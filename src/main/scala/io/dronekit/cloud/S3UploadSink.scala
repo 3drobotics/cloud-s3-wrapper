@@ -24,6 +24,8 @@ import scala.util.{Failure, Success}
 
 object S3UploadSink {
 
+  val retries = 2
+
   sealed trait UploadState
   case object UploadStarted extends UploadState
   case class UploadFailed(ex: Throwable) extends UploadState
@@ -36,7 +38,7 @@ object S3UploadSink {
     Props(new S3UploadSink(s3Client, bucket, key))
 
   private def uploadPartToAmazon(parent: ActorRef, buffer: ByteString, partNumber: Int, s3Client: AmazonS3Client,
-                         multipartId: String, bucket: String, key: String)(implicit ec: ExecutionContext): Unit = {
+                         multipartId: String, bucket: String, key: String, retryNum: Int = 0)(implicit ec: ExecutionContext): Unit = {
     // TODO: How to get logger in this method?
     val uploadFuture = Future {
       val inputStream = new ByteArrayInputStream(buffer.toArray[Byte])
@@ -57,7 +59,13 @@ object S3UploadSink {
       }
       case Failure(ex) => {
         println(s"Upload failed for $partNumber with exception $ex")
-        parent ! UploadResult(partNumber, UploadFailed(ex))
+        // try again
+        if (retryNum >= retries) {
+          parent ! UploadResult(partNumber, UploadFailed(ex))
+        } else {
+          println(s"retrying upload, on retry ${retryNum}")
+          uploadPartToAmazon(parent, buffer, partNumber, s3Client, multipartId, bucket, key, retryNum + 1)
+        }
       }
     }
   }
@@ -94,7 +102,7 @@ class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String) extend
 
   private def signalDemand(): Unit = {
     val freeBuffers = MaxQueueSize - outstandingChunks
-    val availableDemand = 10 - requested
+    val availableDemand = MaxQueueSize - requested
     if (freeBuffers > 0 && !upstreamComplete) {
       request(availableDemand)
       requested += availableDemand
