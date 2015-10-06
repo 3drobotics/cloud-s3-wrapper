@@ -5,7 +5,7 @@ import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
 import com.amazonaws.services.s3.AmazonS3Client
-import io.dronekit.cloud.S3UploadSink
+import io.dronekit.S3UploadSink
 
 import scala.concurrent.ExecutionContextExecutor
 import scala.language.postfixOps

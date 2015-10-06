@@ -1,4 +1,4 @@
-name := "S3UploadSink"
+name := "AWSWrapper"
 
 version := "1.0"
 

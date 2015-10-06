@@ -1,4 +1,4 @@
-package io.dronekit.cloud
+package io.dronekit
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
 
@@ -16,17 +16,19 @@ import scala.concurrent.{ExecutionContext, Future}
  *
  */
 
+class AWSException(msg: String) extends RuntimeException
+
 /**
  * Container for the actual AWS client (which can't be mocked easily)
  */
-object AWSClient  {
-  val s3Client = new AmazonS3Client()
+object S3  {
+  val client = new AmazonS3Client()
 }
 
 /**
  * Wrapper object around AWS client to allow mocking
  */
-class AWSWrapper(awsBucket: String, awsPathPrefix: String)(implicit ec: ExecutionContext) {
+class AWSWrapper(awsBucket: String, awsPathPrefix: String, S3Client: AmazonS3Client = S3.client)(implicit ec: ExecutionContext) {
 
   private def toByteArray(src: InputStream) = {
     val buffer = new ByteArrayOutputStream()
@@ -41,29 +43,42 @@ class AWSWrapper(awsBucket: String, awsPathPrefix: String)(implicit ec: Executio
     buffer.toByteArray
   }
 
-  def getObject(s3url: String): Future[Array[Byte]] = {
+  def getObjectS3URL(s3url: String): Future[Array[Byte]] = {
     val bucket = s3url.stripPrefix("s3://").split("/")(0)
     val key = s3url.stripPrefix("s3://").split("/").tail.mkString("/")
     getObject(bucket, key)
   }
 
-  def getObject(bucket: String, key: String): Future[Array[Byte]] = {
+  private def getObject(bucket: String, key: String): Future[Array[Byte]] = {
     Future {
-      val obj = AWSClient.s3Client.getObject(bucket, key)
+      val obj = S3Client.getObject(bucket, key)
       toByteArray(obj.getObjectContent)
+    }
+  }
+
+  def getObject(key: String): Future[Array[Byte]] = {
+    Future {
+      val obj = S3Client.getObject(awsBucket, key)
+      toByteArray(obj.getObjectContent)
+    }
+  }
+
+  def getObjectMetadata(key:String): Future[ObjectMetadata] = {
+    Future {
+      S3Client.getObjectMetadata(awsBucket, awsPathPrefix+key)
     }
   }
 
   def getObjectAsInputStream(s3url: String): Future[InputStream] = {
     val bucket = s3url.stripPrefix("s3://").split("/")(0)
     val key = s3url.stripPrefix("s3://").split("/").tail.mkString("/")
-    Future {AWSClient.s3Client.getObject(bucket, key).getObjectContent}
+    Future {S3Client.getObject(bucket, key).getObjectContent}
   }
 
   def insertIntoBucket(name: String, data: ByteString): Future[String] = {
     val dataInputStream = new ByteArrayInputStream(data.toByteBuffer.array())
     Future {
-      AWSClient.s3Client.putObject(awsBucket, name, dataInputStream, new ObjectMetadata())
+      S3Client.putObject(awsBucket, name, dataInputStream, new ObjectMetadata())
       awsPathPrefix+name
     }
   }
@@ -71,12 +86,12 @@ class AWSWrapper(awsBucket: String, awsPathPrefix: String)(implicit ec: Executio
   def getSignedUrl(key: String): Future[String] = {
     val expiration: java.util.Date = new DateTime().plusHours(2).toDate
     Future {
-      val ret = AWSClient.s3Client.generatePresignedUrl(awsBucket, awsPathPrefix+key, expiration)
+      val ret = S3Client.generatePresignedUrl(awsBucket, awsPathPrefix+key, expiration)
       ret.toString
     }
   }
 
   def multipartUploadSink(key: String): Sink[Any, ActorRef] = {
-    Sink.actorSubscriber(S3UploadSink.props(AWSClient.s3Client, awsBucket, awsPathPrefix+key))
+    Sink.actorSubscriber(S3UploadSink.props(S3Client, awsBucket, awsPathPrefix+key))
   }
 }

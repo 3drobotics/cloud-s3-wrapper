@@ -1,15 +1,15 @@
-package io.dronekit.cloud
+package io.dronekit
 
 import java.io.ByteArrayInputStream
 import java.util
 
 import akka.actor.{ActorRef, Props}
-import akka.event.Logging
+import akka.event.{LoggingAdapter, Logging}
 import akka.stream.actor._
 import akka.util.ByteString
 import com.amazonaws.services.s3.AmazonS3Client
 import com.amazonaws.services.s3.model._
-import io.dronekit.cloud.S3UploadSink.{UploadChunk, UploadCompleted, UploadFailed, UploadResult, UploadStarted}
+import io.dronekit.S3UploadSink.{UploadChunk, UploadCompleted, UploadFailed, UploadResult, UploadStarted}
 
 import scala.collection.JavaConversions._
 import scala.collection._
@@ -38,7 +38,7 @@ object S3UploadSink {
     Props(new S3UploadSink(s3Client, bucket, key))
 
   private def uploadPartToAmazon(parent: ActorRef, buffer: ByteString, partNumber: Int, s3Client: AmazonS3Client,
-                         multipartId: String, bucket: String, key: String, retryNum: Int = 0)(implicit ec: ExecutionContext): Unit = {
+                         multipartId: String, bucket: String, key: String, retryNum: Int = 0)(implicit ec: ExecutionContext, logger: LoggingAdapter): Unit = {
     // TODO: How to get logger in this method?
     val uploadFuture = Future {
       val inputStream = new ByteArrayInputStream(buffer.toArray[Byte])
@@ -49,21 +49,22 @@ object S3UploadSink {
         .withPartNumber(partNumber)
         .withPartSize(buffer.length)
         .withInputStream(inputStream)
-      println(s"Uploading part $partNumber")
+
+      logger.debug(s"Uploading part $partNumber")
       s3Client.uploadPart(partUploadRequest)
     }
     uploadFuture.onComplete {
       case Success(result) => {
-        println(s"Upload completed successfully for $partNumber")
+        logger.debug(s"Upload completed successfully for $partNumber")
         parent ! UploadResult(result.getPartNumber, UploadCompleted, Some(result.getPartETag))
       }
       case Failure(ex) => {
-        println(s"Upload failed for $partNumber with exception $ex")
+        logger.debug(s"Upload failed for $partNumber with exception $ex")
         // try again
         if (retryNum >= retries) {
           parent ! UploadResult(partNumber, UploadFailed(ex))
         } else {
-          println(s"retrying upload, on retry ${retryNum}")
+          logger.debug(s"retrying upload, on retry ${retryNum}")
           uploadPartToAmazon(parent, buffer, partNumber, s3Client, multipartId, bucket, key, retryNum + 1)
         }
       }
@@ -80,7 +81,7 @@ object S3UploadSink {
 class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String) extends ActorSubscriber {
   import ActorSubscriberMessage._
   implicit val ec: ExecutionContext = context.system.dispatcher
-  val logger = Logging(context.system, getClass)
+  implicit val logger = Logging(context.system, getClass())
 
   override protected def requestStrategy: RequestStrategy = ZeroRequestStrategy
 
@@ -172,13 +173,16 @@ class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String) extend
       case UploadStarted =>
         logger.error(s"ERROR, should not get an upload started message. number: $number, etag: $etag")
       case UploadFailed(ex) => {
-        logger.warning(s"Upload of part $number failed with exception: $ex")
-        abortUpload()
+        self ! OnError(new AmazonS3Exception("Aborting upload"))
       }
       case UploadCompleted => {
         logger.info(s"Upload of part $number completed. Demand: $requested")
         setPartCompleted(number, etag)
       }
+    }
+    case ex: Exception => {
+
+      throw ex
     }
   }
 }
