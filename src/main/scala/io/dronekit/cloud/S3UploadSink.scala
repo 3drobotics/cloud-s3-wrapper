@@ -15,63 +15,12 @@ import com.amazonaws.services.s3.model._
 import scala.collection.JavaConversions._
 import scala.collection._
 import scala.concurrent.{Promise, ExecutionContext, Future}
-import scala.util.{Failure, Success}
+import scala.util.{Try, Failure, Success}
 
 /**
  * Created by Jason Martens <jason.martens@3drobotics.com> on 8/18/15.
  *
  */
-
-
-//object S3UploadSink {
-//
-//
-//}
-
-class S3UploadAsync()(implicit ec: ExecutionContext) extends AsyncStage[Future[Int], Int, Int] {
-  var elementsToUpload = 0
-
-  override def onAsyncInput(event: Int, ctx: AsyncContext[Int, Int]): Directive = {
-    elementsToUpload = elementsToUpload - 1
-
-    if (elementsToUpload == 0 && ctx.isFinishing) {
-      // if there are no more elements in the upload queue, finish the context
-      println("asyncstage .finish()")
-      ctx.finish()
-    } else {
-      // future completed
-      println(s"onAsyncInput not finished, ctx.isFinishing:${ctx.isFinishing}")
-      ctx.push(0)
-    }
-  }
-
-  override def onPush(elem: Future[Int], ctx: AsyncContext[Int, Int]): SyncDirective = {
-    println("AsyncStage onPush called")
-    elementsToUpload = elementsToUpload + 1
-    elem.onSuccess { case x => {
-      println("future completed, invoking...")
-      ctx.getAsyncCallback().invoke(x)
-    } }
-
-    // abort on failure
-    elem.onFailure {case ex => {
-      println("future failed, should abort")
-      ctx.fail(new AWSException("something bad happened"))
-    }}
-
-    ctx.push(0)
-  }
-
-  override def onPull(ctx: AsyncContext[Int, Int]): SyncDirective = {
-    println("AsyncStage onPull called")
-    ctx.pull()
-  }
-
-  override def onUpstreamFinish(ctx: AsyncContext[Int, Int]): TerminationDirective = {
-    println("AsyncStage overriding onUpstreamFinish")
-    ctx.absorbTermination()
-  }
-}
 
 /**
  * An Akka Streams Sink which uploads a ByteString to S3 as a multipart upload.
@@ -79,11 +28,11 @@ class S3UploadAsync()(implicit ec: ExecutionContext) extends AsyncStage[Future[I
  * @param bucket The name of the bucket to upload to
  * @param key The key to use for the upload
  */
-class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String)(implicit ec: ExecutionContext) extends PushPullStage[ByteString, Future[Int]] {
+class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String)(implicit ec: ExecutionContext) extends AsyncStage[ByteString, Int, Unit] {
   private var allUploadsFinished = false
 
   val retries = 2
-
+  var elementsToUpload = 0
   sealed trait UploadState
   case object UploadStarted extends UploadState
   case class UploadFailed(ex: Throwable) extends UploadState
@@ -105,82 +54,121 @@ class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String)(implic
   var multipartCompleted = false
   private var onLastChunk = false
 
-  override def onPush(elem: ByteString, ctx: Context[Future[Int]]): SyncDirective = {
-    println("onPush called")
-    buffer ++= elem
-    println("context is not finishing")
-//    uploadIfBufferFull()
-
-    if (buffer.length > MaxBufferSize) {
-      ctx.push(uploadBuffer())
+  override def onAsyncInput(event: Unit, ctx: AsyncContext[Int, Unit]): Directive = {
+    if (chunkMap.forall {case (part, chunk) => chunk.state == UploadCompleted } && ctx.isFinishing) {
+      // if there are no more elements in the upload queue, finish the context
+//      println(s"asyncstage .finish(), ${chunkMap}")
+      completeUpload()
+//      finishUpload()
+      ctx.finish()
     } else {
-      ctx.push(Future{0}) // bogus number for now
+      // future completed
+      println(s"onAsyncInput not finished, ctx.isFinishing:${ctx.isFinishing}")
+      ctx.ignore()
     }
   }
 
-  override def onPull(ctx: Context[Future[Int]]): SyncDirective = {
-    if (ctx.isFinishing) {
-      onLastChunk = true
-      println("onpull context finished")
-      uploadBuffer()
-      completeUpload()
-      ctx.finish()
+  override def onPush(elem: ByteString, ctx: AsyncContext[Int, Unit]): UpstreamDirective = {
+//    println("onPush called")
+    buffer ++= elem
+//    println("context is not finishing")
+//    uploadIfBufferFull()
+
+    if (buffer.length > MaxBufferSize) {
+      // upload and create future
+//      ctx.push(uploadBuffer())
+      elementsToUpload = elementsToUpload + 1
+      println(s"add elements to upload ${elementsToUpload}")
+
+      uploadBuffer(ctx.getAsyncCallback())
+//      ctx.holdDownstream()
+      ctx.pull()
     } else {
-      println("on pull context not finished")
+      // get more data
       ctx.pull()
     }
   }
 
-  override def onUpstreamFinish(ctx: Context[Future[Int]]): TerminationDirective = {
+  override def onPull(ctx: AsyncContext[Int, Unit]): DownstreamDirective = {
+    if (ctx.isFinishing) {
+      onLastChunk = true
+//      println("onpull context finished")
+      elementsToUpload = elementsToUpload + 1
+      println(s"add elements to upload ${elementsToUpload}")
+      uploadBuffer(ctx.getAsyncCallback())
+
+      ctx.holdDownstream()
+    } else {
+//      println("on pull context not finished")
+      ctx.holdDownstream()
+//      ctx.push(0)
+    }
+  }
+
+  override def onUpstreamFinish(ctx: AsyncContext[Int, Unit]): TerminationDirective = {
     ctx.absorbTermination()
   }
 
   def setPartCompleted(partNumber: Long, etag: Option[PartETag]): Unit = {
-    println(s"Completing $partNumber in chunkMap")
     chunkMap(partNumber) = UploadChunk(partNumber, ByteString.empty, UploadCompleted, etag)
-    if (onLastChunk) {
-      if (chunkMap.forall {case (part, chunk) => chunk.state == UploadCompleted }) {
-        //      println(s"All chunks uploaded, stopping actor...")
-        completeUpload()
-        //      context.stop(self)
-      } else {
-        println(" this shouldn't exist & is an error state");
-      }
-    }
+    println(s"Completing $partNumber in chunkMap ${chunkMap(partNumber)}, ${chunkMap.size}")
+
+    elementsToUpload = elementsToUpload - 1
+    println(s"elements to upload ${elementsToUpload}")
+    //    if (onLastChunk) {
+//
+//    }
   }
 
+//  def finishUpload(): Unit ={
+//    if () {
+//      //      println(s"All chunks uploaded, stopping actor...")
+//      completeUpload()
+//      //      context.stop(self)
+//    } else {
+//      println("this shouldn't exist & is an error state");
+//    }
+//  }
+
   private def uploadPartToAmazon(buffer: ByteString, partNumber: Int, s3Client: AmazonS3Client,
-                                 multipartId: String, bucket: String, key: String, retryNum: Int = 0): Unit = {
+                                 multipartId: String, bucket: String, key: String, retryNum: Int = 0): Future[UploadPartResult] = {
     // TODO: How to get logger in this method?
-      val inputStream = new ByteArrayInputStream(buffer.toArray[Byte])
-      val partUploadRequest = new UploadPartRequest()
-        .withBucketName(bucket)
-        .withKey(key)
-        .withUploadId(multipartId)
-        .withPartNumber(partNumber)
-        .withPartSize(buffer.length)
-        .withInputStream(inputStream)
+      val uploadFuture = Future {
+        val inputStream = new ByteArrayInputStream(buffer.toArray[Byte])
+        val partUploadRequest = new UploadPartRequest()
+          .withBucketName(bucket)
+          .withKey(key)
+          .withUploadId(multipartId)
+          .withPartNumber(partNumber)
+          .withPartSize(buffer.length)
+          .withInputStream(inputStream)
 
+        s3Client.uploadPart(partUploadRequest)
+      }
       println(s"Uploading part $partNumber")
-      try {
-        val result = s3Client.uploadPart(partUploadRequest)
-        setPartCompleted(result.getPartNumber, Some(result.getPartETag))
 
-      } catch {
-        case ex: Throwable => {
+      uploadFuture.onComplete {
+        case Success(result) => {
+          println(s"Upload completed successfully for $partNumber")
+//          parent ! UploadResult(result.getPartNumber, UploadCompleted, Some(result.getPartETag))
+
+          setPartCompleted(result.getPartNumber, Some(result.getPartETag))
+        }
+        case Failure(ex) => {
           println(s"Upload failed for $partNumber with exception $ex")
           // try again
           if (retryNum >= retries) {
-            //          setPartCompleted(UploadResult(partNumber, UploadFailed(ex)))
-
-            // signal failure here
+//            parent ! UploadResult(partNumber, UploadFailed(ex))
             println("retries failed, this should error out")
+
           } else {
             println(s"retrying upload, on retry ${retryNum}")
             uploadPartToAmazon(buffer, partNumber, s3Client, multipartId, bucket, key, retryNum + 1)
           }
         }
       }
+
+      uploadFuture
     }
 
 
@@ -207,6 +195,7 @@ class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String)(implic
   }
 
   private def completeUpload() = {
+    println("starting complete upload")
     val etagList = chunkMap.toList.sortBy {case (part, chunk) => part}.map{case (part, chunk) => chunk.etag.get}
     val etagArrayList: util.ArrayList[PartETag] = new util.ArrayList[PartETag](etagList.toIndexedSeq)
     val completeRequest = new CompleteMultipartUploadRequest(bucket, key, multipartUpload.getUploadId, etagArrayList)
@@ -215,17 +204,18 @@ class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String)(implic
     println(s"Completed upload: $result")
   }
 
-  private def uploadBuffer(): Future[Int] = {
+  private def uploadBuffer(asyncCb: AsyncCallback[Unit]): Future[UploadPartResult] = {
     println(s"UploadBuffer for part $partNumber")
     chunkMap(partNumber) = UploadChunk(partNumber, buffer, UploadStarted, None)
-    val uploadRes = Future {
-      uploadPartToAmazon(buffer, partNumber, s3Client, multipartUpload.getUploadId, bucket, key)
-      10
-    }
+//    val uploadRes = Future {
+    val uploadFuture = uploadPartToAmazon(buffer, partNumber, s3Client, multipartUpload.getUploadId, bucket, key)
+//      10
+//    }
     partNumber += 1
     buffer = ByteString.empty
 
-    uploadRes
+    uploadFuture.onComplete({x => asyncCb.invoke()})
+    uploadFuture
   }
 
 //  private def uploadIfBufferFull(): Future[Unit] = {

@@ -11,6 +11,7 @@ import com.amazonaws.services.s3.model.ObjectMetadata
 import org.joda.time.DateTime
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Try
 
 /**
  * Created by Jason Martens <jason.martens@3drobotics.com> on 9/17/15.
@@ -92,12 +93,9 @@ class AWSWrapper(awsBucket: String, awsPathPrefix: String, S3Client: AmazonS3Cli
     }
   }
 
-  def multipartUploadTransform(key: String): PushPullStage[ByteString, Future[Int]] = {
+  def multipartUploadTransform(key: String): AsyncStage[ByteString, Int, Unit] = {
 //    Sink.actorSubscriber(S3UploadSink.props(S3Client, awsBucket, awsPathPrefix+key))
     new S3UploadSink(S3Client, awsBucket, awsPathPrefix+key)
   }
 
-  def multipartUploadFinish(): AsyncStage[Future[Int], Int, Int] = {
-    new S3UploadAsync()
-  }
 }

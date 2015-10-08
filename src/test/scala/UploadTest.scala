@@ -29,38 +29,37 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
   implicit val timeout = Timeout(200 seconds)
 
   "io.dronekit.cloud.S3UploadSink" should {
-//    "handle all messages" in {
-//      val url = getClass.getResource("/recap_res.obj.zip")
-//      val file = new File(url.getFile)
-//      println(s"Reading file of size: ${file.length()}")
-//      val imageSource = SynchronousFileSource(file)
-//      val res = imageSource
-//        .transform( () => aws.multipartUploadTransform("recap_res.obj.zip"))
-//        .runWith(Sink.ignore)
-////      while (!res.isTerminated) Thread.sleep(100)
-//
-//      Await.ready(res, timeout.duration)
-//      val metadataRes = Await.result(aws.getObjectMetadata("recap_res.obj.zip"), 60 seconds)
-//      assert(metadataRes.getETag == "4c412eb0b9ee1c7f628cbcf07ae9bbac-10")
-//    }
-
-    "handle a small upload" in {
-      val url = getClass.getResource("/smallfile.txt")
+    "handle all messages" in {
+      val url = getClass.getResource("/recap_res.obj.zip")
       val file = new File(url.getFile)
       println(s"Reading file of size: ${file.length()}")
       val imageSource = SynchronousFileSource(file)
-
-//      val testSink = aws.multipartUploadSink("smallfile.txt")
       val res = imageSource
-        .transform( () => aws.multipartUploadTransform("smallfile_2.txt"))
-        .transform( () => aws.multipartUploadFinish)
+        .transform( () => aws.multipartUploadTransform("recap_res.obj.zip"))
         .runWith(Sink.ignore)
+//      while (!res.isTerminated) Thread.sleep(100)
 
       Await.ready(res, timeout.duration)
-      // check for md5
-      val metadataRes = Await.result(aws.getObjectMetadata("smallfile_2.txt"), 60 seconds)
-      assert(metadataRes.getETag == "49ea9fa860f88a45545f5c59bc6dafbe-1")
+      val metadataRes = Await.result(aws.getObjectMetadata("recap_res.obj.zip"), 60 seconds)
+      assert(metadataRes.getETag == "4c412eb0b9ee1c7f628cbcf07ae9bbac-10")
     }
+
+//    "handle a small upload" in {
+//      val url = getClass.getResource("/smallfile.txt")
+//      val file = new File(url.getFile)
+//      println(s"Reading file of size: ${file.length()}")
+//      val imageSource = SynchronousFileSource(file)
+//
+////      val testSink = aws.multipartUploadSink("smallfile.txt")
+//      val res = imageSource
+//        .transform( () => aws.multipartUploadTransform("smallfile_2.txt"))
+//        .runWith(Sink.ignore)
+//
+//      Await.ready(res, timeout.duration)
+//      // check for md5
+//      val metadataRes = Await.result(aws.getObjectMetadata("smallfile_2.txt"), 60 seconds)
+//      assert(metadataRes.getETag == "49ea9fa860f88a45545f5c59bc6dafbe-1")
+//    }
 
 //    "handle upload with retries" in {
 //      class FakeS3 extends AmazonS3Client {
