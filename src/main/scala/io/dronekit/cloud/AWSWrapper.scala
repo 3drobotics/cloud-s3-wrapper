@@ -1,8 +1,9 @@
 package io.dronekit
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
-
+import akka.event.Logging
 import akka.actor.ActorRef
+import akka.event.LoggingAdapter
 import akka.stream.scaladsl.Sink
 import akka.stream.stage.{AsyncStage, PushPullStage}
 import akka.util.ByteString
@@ -30,7 +31,7 @@ object S3  {
 /**
  * Wrapper object around AWS client to allow mocking
  */
-class AWSWrapper(awsBucket: String, awsPathPrefix: String, S3Client: AmazonS3Client = S3.client)(implicit ec: ExecutionContext) {
+class AWSWrapper(awsBucket: String, awsPathPrefix: String, logger: LoggingAdapter, S3Client: AmazonS3Client = S3.client)(implicit ec: ExecutionContext) {
 
   private def toByteArray(src: InputStream) = {
     val buffer = new ByteArrayOutputStream()
@@ -93,9 +94,9 @@ class AWSWrapper(awsBucket: String, awsPathPrefix: String, S3Client: AmazonS3Cli
     }
   }
 
-  def multipartUploadTransform(key: String): AsyncStage[ByteString, Int, Unit] = {
+  def multipartUploadTransform(key: String): AsyncStage[ByteString, Int, Option[Throwable]] = {
 //    Sink.actorSubscriber(S3UploadSink.props(S3Client, awsBucket, awsPathPrefix+key))
-    new S3UploadSink(S3Client, awsBucket, awsPathPrefix+key)
+    new S3UploadSink(S3Client, awsBucket, awsPathPrefix+key, logger)
   }
 
 }

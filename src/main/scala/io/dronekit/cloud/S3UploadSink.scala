@@ -28,11 +28,9 @@ import scala.util.{Try, Failure, Success}
  * @param bucket The name of the bucket to upload to
  * @param key The key to use for the upload
  */
-class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String)(implicit ec: ExecutionContext) extends AsyncStage[ByteString, Int, Unit] {
-  private var allUploadsFinished = false
+class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String, adapter: LoggingAdapter)(implicit ec: ExecutionContext) extends AsyncStage[ByteString, Int, Option[Throwable]] {
 
   val retries = 2
-  var elementsToUpload = 0
   sealed trait UploadState
   case object UploadStarted extends UploadState
   case class UploadFailed(ex: Throwable) extends UploadState
@@ -46,42 +44,47 @@ class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String)(implic
   val chunkMap = new mutable.LongMap[UploadChunk](MaxQueueSize)
   var buffer = ByteString.empty
   var partNumber = 1
-//  var upstreamComplete = false
-//  var requested = 0
   var partEtags = List[UploadResult]()
   val uploadRequest = new InitiateMultipartUploadRequest(bucket, key)
-  val multipartUpload = s3Client.initiateMultipartUpload(uploadRequest)
-  var multipartCompleted = false
-  private var onLastChunk = false
-
-  override def onAsyncInput(event: Unit, ctx: AsyncContext[Int, Unit]): Directive = {
-    if (chunkMap.forall {case (part, chunk) => chunk.state == UploadCompleted } && ctx.isFinishing) {
-      // if there are no more elements in the upload queue, finish the context
-//      println(s"asyncstage .finish(), ${chunkMap}")
-      completeUpload()
-//      finishUpload()
-      ctx.finish()
-    } else {
-      // future completed
-      println(s"onAsyncInput not finished, ctx.isFinishing:${ctx.isFinishing}")
-      ctx.ignore()
+  var multipartUpload: Option[InitiateMultipartUploadResult] = None
+  try {
+    multipartUpload = Some(s3Client.initiateMultipartUpload(uploadRequest))
+  } catch {
+    case ex: Throwable => {
+      adapter.debug(s"s3Client.initiateMultipartUpload failed with ${ex}")
     }
   }
 
-  override def onPush(elem: ByteString, ctx: AsyncContext[Int, Unit]): UpstreamDirective = {
-//    println("onPush called")
+  var multipartCompleted = false
+  private var onLastChunk = false
+
+  override def onAsyncInput(event: Option[Throwable], ctx: AsyncContext[Int, Option[Throwable]]): Directive = {
+    if (event.nonEmpty) {
+      abortUpload()
+      ctx.fail(event.get)
+    } else {
+      if (outstandingChunks == 0 && ctx.isFinishing) {
+        try {
+          completeUpload()
+          ctx.finish()
+        } catch {
+          case ex: Throwable => {
+            abortUpload()
+            ctx.fail(ex)
+          }
+        }
+      } else {
+        // future completed
+        ctx.ignore()
+      }
+    }
+  }
+
+  override def onPush(elem: ByteString, ctx: AsyncContext[Int, Option[Throwable]]): UpstreamDirective = {
     buffer ++= elem
-//    println("context is not finishing")
-//    uploadIfBufferFull()
 
     if (buffer.length > MaxBufferSize) {
-      // upload and create future
-//      ctx.push(uploadBuffer())
-      elementsToUpload = elementsToUpload + 1
-      println(s"add elements to upload ${elementsToUpload}")
-
       uploadBuffer(ctx.getAsyncCallback())
-//      ctx.holdDownstream()
       ctx.pull()
     } else {
       // get more data
@@ -89,50 +92,30 @@ class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String)(implic
     }
   }
 
-  override def onPull(ctx: AsyncContext[Int, Unit]): DownstreamDirective = {
+  override def onPull(ctx: AsyncContext[Int, Option[Throwable]]): DownstreamDirective = {
     if (ctx.isFinishing) {
       onLastChunk = true
-//      println("onpull context finished")
-      elementsToUpload = elementsToUpload + 1
-      println(s"add elements to upload ${elementsToUpload}")
       uploadBuffer(ctx.getAsyncCallback())
 
       ctx.holdDownstream()
     } else {
-//      println("on pull context not finished")
       ctx.holdDownstream()
-//      ctx.push(0)
     }
   }
 
-  override def onUpstreamFinish(ctx: AsyncContext[Int, Unit]): TerminationDirective = {
+  override def onUpstreamFinish(ctx: AsyncContext[Int, Option[Throwable]]): TerminationDirective = {
     ctx.absorbTermination()
   }
 
   def setPartCompleted(partNumber: Long, etag: Option[PartETag]): Unit = {
     chunkMap(partNumber) = UploadChunk(partNumber, ByteString.empty, UploadCompleted, etag)
-    println(s"Completing $partNumber in chunkMap ${chunkMap(partNumber)}, ${chunkMap.size}")
-
-    elementsToUpload = elementsToUpload - 1
-    println(s"elements to upload ${elementsToUpload}")
-    //    if (onLastChunk) {
-//
-//    }
   }
 
-//  def finishUpload(): Unit ={
-//    if () {
-//      //      println(s"All chunks uploaded, stopping actor...")
-//      completeUpload()
-//      //      context.stop(self)
-//    } else {
-//      println("this shouldn't exist & is an error state");
-//    }
-//  }
-
   private def uploadPartToAmazon(buffer: ByteString, partNumber: Int, s3Client: AmazonS3Client,
-                                 multipartId: String, bucket: String, key: String, retryNum: Int = 0): Future[UploadPartResult] = {
-    // TODO: How to get logger in this method?
+                                 multipartId: String, bucket: String, key: String, retryNum: Int = 0): Future[Unit] = {
+    val futureWrapper = Promise[Unit]()
+
+    def uploadHelper(retryNumLocal: Int) {
       val uploadFuture = Future {
         val inputStream = new ByteArrayInputStream(buffer.toArray[Byte])
         val partUploadRequest = new UploadPartRequest()
@@ -145,83 +128,72 @@ class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String)(implic
 
         s3Client.uploadPart(partUploadRequest)
       }
-      println(s"Uploading part $partNumber")
+      adapter.debug(s"Uploading part $partNumber")
 
       uploadFuture.onComplete {
         case Success(result) => {
-          println(s"Upload completed successfully for $partNumber")
-//          parent ! UploadResult(result.getPartNumber, UploadCompleted, Some(result.getPartETag))
+          adapter.debug(s"Upload completed successfully for $partNumber")
 
           setPartCompleted(result.getPartNumber, Some(result.getPartETag))
+          futureWrapper.success()
         }
         case Failure(ex) => {
-          println(s"Upload failed for $partNumber with exception $ex")
           // try again
-          if (retryNum >= retries) {
-//            parent ! UploadResult(partNumber, UploadFailed(ex))
-            println("retries failed, this should error out")
-
+          if (retryNumLocal >= retries) {
+            futureWrapper.failure(new AWSException(s"Uploading part failed for part ${partNumber} and multipartId: ${multipartId}"))
           } else {
-            println(s"retrying upload, on retry ${retryNum}")
-            uploadPartToAmazon(buffer, partNumber, s3Client, multipartId, bucket, key, retryNum + 1)
+            adapter.debug(s"Retrying upload on part ${partNumber}, on retry ${retryNumLocal}")
+            uploadHelper(retryNumLocal + 1)
           }
         }
       }
-
-      uploadFuture
     }
 
+    uploadHelper(retryNum)
+
+    futureWrapper.future
+  }
 
 
   private def outstandingChunks: Long = {
     chunkMap.filter{case (part, chunk) => chunk.state != UploadCompleted}.toList.length
   }
 
-//  private def signalDemand(ctx: Context[Int]): Unit = {
-//    val freeBuffers = MaxQueueSize - outstandingChunks
-//    val availableDemand = MaxQueueSize - requested
-//    if (freeBuffers > 0 && !upstreamComplete) {
-//      request(availableDemand)
-//      requested += availableDemand
-//    }
-//  }
-//
-//  signalDemand()
-
   private def abortUpload() = {
-    println(s"Aborting upload to $bucket/$key with id ${multipartUpload.getUploadId}")
-    s3Client.abortMultipartUpload(new AbortMultipartUploadRequest(bucket, key, multipartUpload.getUploadId))
-//    context.stop(self)
+    adapter.debug(s"Aborting upload to $bucket/$key with id ${multipartUpload.get.getUploadId}")
+    s3Client.abortMultipartUpload(new AbortMultipartUploadRequest(bucket, key, multipartUpload.get.getUploadId))
   }
 
   private def completeUpload() = {
-    println("starting complete upload")
     val etagList = chunkMap.toList.sortBy {case (part, chunk) => part}.map{case (part, chunk) => chunk.etag.get}
     val etagArrayList: util.ArrayList[PartETag] = new util.ArrayList[PartETag](etagList.toIndexedSeq)
-    val completeRequest = new CompleteMultipartUploadRequest(bucket, key, multipartUpload.getUploadId, etagArrayList)
+    val completeRequest = new CompleteMultipartUploadRequest(bucket, key, multipartUpload.get.getUploadId, etagArrayList)
     val result = s3Client.completeMultipartUpload(completeRequest)
     multipartCompleted = true
-    println(s"Completed upload: $result")
+    adapter.debug(s"Completed upload: $result")
   }
 
-  private def uploadBuffer(asyncCb: AsyncCallback[Unit]): Future[UploadPartResult] = {
-    println(s"UploadBuffer for part $partNumber")
-    chunkMap(partNumber) = UploadChunk(partNumber, buffer, UploadStarted, None)
-//    val uploadRes = Future {
-    val uploadFuture = uploadPartToAmazon(buffer, partNumber, s3Client, multipartUpload.getUploadId, bucket, key)
-//      10
-//    }
-    partNumber += 1
-    buffer = ByteString.empty
+  private def uploadBuffer(asyncCb: AsyncCallback[Option[Throwable]]): Future[Unit] = {
+    if (multipartUpload.isEmpty) {
+      asyncCb.invoke(Some(new AWSException("Could not initiate multipart upload")))
+      Future {}
+    } else {
+      chunkMap(partNumber) = UploadChunk(partNumber, buffer, UploadStarted, None)
+      val uploadFuture = uploadPartToAmazon(buffer, partNumber, s3Client, multipartUpload.get.getUploadId, bucket, key)
+      partNumber += 1
+      buffer = ByteString.empty
 
-    uploadFuture.onComplete({x => asyncCb.invoke()})
-    uploadFuture
+      uploadFuture.onComplete{
+        case Success(x) => asyncCb.invoke(None)
+        case Failure(ex) => {
+          adapter.debug(s"Upload future got failure ${ex}")
+          asyncCb.invoke(Some(ex))
+        }
+      }
+
+      uploadFuture
+    }
   }
 
-//  private def uploadIfBufferFull(): Future[Unit] = {
-//    if (buffer.length > MaxBufferSize) {
-//      uploadBuffer()
-//    }
-//  }
 
 }
