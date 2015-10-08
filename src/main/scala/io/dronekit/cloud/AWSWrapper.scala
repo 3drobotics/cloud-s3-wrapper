@@ -4,6 +4,7 @@ import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
 
 import akka.actor.ActorRef
 import akka.stream.scaladsl.Sink
+import akka.stream.stage.{AsyncStage, PushPullStage}
 import akka.util.ByteString
 import com.amazonaws.services.s3.AmazonS3Client
 import com.amazonaws.services.s3.model.ObjectMetadata
@@ -91,7 +92,12 @@ class AWSWrapper(awsBucket: String, awsPathPrefix: String, S3Client: AmazonS3Cli
     }
   }
 
-  def multipartUploadSink(key: String): Sink[Any, ActorRef] = {
-    Sink.actorSubscriber(S3UploadSink.props(S3Client, awsBucket, awsPathPrefix+key))
+  def multipartUploadTransform(key: String): PushPullStage[ByteString, Future[Int]] = {
+//    Sink.actorSubscriber(S3UploadSink.props(S3Client, awsBucket, awsPathPrefix+key))
+    new S3UploadSink(S3Client, awsBucket, awsPathPrefix+key)
+  }
+
+  def multipartUploadFinish(): AsyncStage[Future[Int], Int, Int] = {
+    new S3UploadAsync()
   }
 }

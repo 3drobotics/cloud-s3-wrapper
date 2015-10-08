@@ -7,6 +7,7 @@ import akka.http.scaladsl.testkit.{RouteTestTimeout, ScalatestRouteTest}
 import akka.stream.io.SynchronousFileSource
 import akka.stream.scaladsl.Sink
 import akka.testkit._
+import akka.util.Timeout
 import com.amazonaws.AmazonClientException
 import com.amazonaws.services.s3.AmazonS3Client
 import com.amazonaws.services.s3.model._
@@ -20,11 +21,12 @@ import scala.concurrent.duration._
  * Created by Jason Martens <jason.martens@3drobotics.com> on 8/17/15.
  *
  */
-class UploadTest extends WordSpec with Matchers with ScalatestRouteTest with Service {
+class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
   implicit def default(implicit system: ActorSystem) = RouteTestTimeout(5.seconds dilated)
-  override val logger = Logging(system, getClass)
+//  override val logger = Logging(system, getClass)
   val bucketName = "com.3dr.publictest"
   val aws = new AWSWrapper(bucketName, "")
+  implicit val timeout = Timeout(200 seconds)
 
   "io.dronekit.cloud.S3UploadSink" should {
 //    "handle all messages" in {
@@ -33,30 +35,33 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest with Ser
 //      println(s"Reading file of size: ${file.length()}")
 //      val imageSource = SynchronousFileSource(file)
 //      val res = imageSource
-//        .runWith(aws.multipartUploadSink("recap_res.obj.zip"))
-//      while (!res.isTerminated) Thread.sleep(100)
+//        .transform( () => aws.multipartUploadTransform("recap_res.obj.zip"))
+//        .runWith(Sink.ignore)
+////      while (!res.isTerminated) Thread.sleep(100)
 //
+//      Await.ready(res, timeout.duration)
 //      val metadataRes = Await.result(aws.getObjectMetadata("recap_res.obj.zip"), 60 seconds)
 //      assert(metadataRes.getETag == "4c412eb0b9ee1c7f628cbcf07ae9bbac-10")
 //    }
-//
-//    "handle a small upload" in {
-//      val url = getClass.getResource("/smallfile.txt")
-//      val file = new File(url.getFile)
-//      println(s"Reading file of size: ${file.length()}")
-//      val imageSource = SynchronousFileSource(file)
-//
+
+    "handle a small upload" in {
+      val url = getClass.getResource("/smallfile.txt")
+      val file = new File(url.getFile)
+      println(s"Reading file of size: ${file.length()}")
+      val imageSource = SynchronousFileSource(file)
+
 //      val testSink = aws.multipartUploadSink("smallfile.txt")
-//      val res = imageSource
-//        .runWith(testSink)
-//
-//      while (!res.isTerminated) Thread.sleep(100)
-//
-//      // check for md5
-//      val metadataRes = Await.result(aws.getObjectMetadata("smallfile.txt"), 60 seconds)
-//      assert(metadataRes.getETag == "49ea9fa860f88a45545f5c59bc6dafbe-1")
-//    }
-//
+      val res = imageSource
+        .transform( () => aws.multipartUploadTransform("smallfile_2.txt"))
+        .transform( () => aws.multipartUploadFinish)
+        .runWith(Sink.ignore)
+
+      Await.ready(res, timeout.duration)
+      // check for md5
+      val metadataRes = Await.result(aws.getObjectMetadata("smallfile_2.txt"), 60 seconds)
+      assert(metadataRes.getETag == "49ea9fa860f88a45545f5c59bc6dafbe-1")
+    }
+
 //    "handle upload with retries" in {
 //      class FakeS3 extends AmazonS3Client {
 //        var partNum = 0
@@ -86,37 +91,38 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest with Ser
 //      assert(metadataRes.getETag == "4c412eb0b9ee1c7f628cbcf07ae9bbac-10")
 //    }
 
-    "abort on bad upload" in {
-      class FakeS3 extends AmazonS3Client {
-        var partNum = 0
-
-        override def uploadPart(uploadPartRequest: UploadPartRequest): UploadPartResult = {
-          throw new AmazonClientException(s"Don't feel like uploading part number ${partNum}")
-        }
-
-        override def abortMultipartUpload(abortMultipartUploadRequest: AbortMultipartUploadRequest): Unit =  {
-
-        }
-      }
-      val badUpload = new AWSWrapper(bucketName, "", new FakeS3())
-
-      val url = getClass.getResource("/recap_res.obj.zip")
-      val file = new File(url.getFile)
-      println(s"Reading file of size: ${file.length()}")
-      val imageSource = SynchronousFileSource(file)
-      try {
-        val res = imageSource
-          .runWith(badUpload.multipartUploadSink("recap_res_3.obj.zip"))
-        while (!res.isTerminated) Thread.sleep(100)
-
-        println("did not get caught")
-        assert(false)
-      } catch {
-        case ex: AWSException => assert(true)
-        case _: Throwable => assert(false)
-      }
-
-    }
+//    "abort on bad upload" in {
+//      class FakeS3 extends AmazonS3Client {
+//        var partNum = 0
+//
+//        override def uploadPart(uploadPartRequest: UploadPartRequest): UploadPartResult = {
+//          throw new AmazonClientException(s"Don't feel like uploading part number ${partNum}")
+//        }
+//
+//        override def abortMultipartUpload(abortMultipartUploadRequest: AbortMultipartUploadRequest): Unit =  {
+//
+//        }
+//      }
+//      val badUpload = new AWSWrapper(bucketName, "", new FakeS3())
+//
+//      val url = getClass.getResource("/recap_res.obj.zip")
+//      val file = new File(url.getFile)
+//      println(s"Reading file of size: ${file.length()}")
+//      val imageSource = SynchronousFileSource(file)
+//      try {
+//        val res = imageSource
+//          .transform()
+//          .runWith(badUpload.multipartUploadSink("recap_res_3.obj.zip"))
+//        while (!res.isTerminated) Thread.sleep(100)
+//
+//        println("did not get caught")
+//        assert(false)
+//      } catch {
+//        case ex: AWSException => assert(true)
+//        case _: Throwable => assert(false)
+//      }
+//
+//    }
 
   }
 
