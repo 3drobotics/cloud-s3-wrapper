@@ -2,16 +2,15 @@ import java.io.File
 
 import akka.actor.ActorSystem
 import akka.event.Logging
-import akka.http.scaladsl.model.{HttpEntity, MediaTypes}
 import akka.http.scaladsl.testkit.{RouteTestTimeout, ScalatestRouteTest}
 import akka.stream.io.SynchronousFileSource
-import akka.stream.scaladsl.{Flow, Sink}
+import akka.stream.scaladsl.Sink
 import akka.testkit._
 import akka.util.Timeout
 import com.amazonaws.AmazonClientException
 import com.amazonaws.services.s3.AmazonS3Client
 import com.amazonaws.services.s3.model._
-import io.dronekit.{AWSException, AWSWrapper, S3UploadSink}
+import io.dronekit.{AWSException, AWSWrapper}
 import org.scalatest._
 
 import scala.concurrent.Await

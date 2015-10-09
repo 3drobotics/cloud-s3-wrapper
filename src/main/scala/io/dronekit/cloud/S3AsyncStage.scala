@@ -3,19 +3,16 @@ package io.dronekit
 import java.io.ByteArrayInputStream
 import java.util
 
-import akka.actor.{ActorRef, Props}
-import akka.event.{LoggingAdapter, Logging}
-import akka.stream.actor._
+import akka.event.{LoggingAdapter}
 import akka.stream.stage._
 import akka.util.ByteString
 import com.amazonaws.services.s3.AmazonS3Client
 import com.amazonaws.services.s3.model._
-//import io.dronekit.S3UploadSink.{UploadChunk, UploadCompleted, UploadFailed, UploadResult, UploadStarted}
 
 import scala.collection.JavaConversions._
 import scala.collection._
 import scala.concurrent.{Promise, ExecutionContext, Future}
-import scala.util.{Try, Failure, Success}
+import scala.util.{Failure, Success}
 
 /**
  * Created by Jason Martens <jason.martens@3drobotics.com> on 8/18/15.
@@ -28,7 +25,7 @@ import scala.util.{Try, Failure, Success}
  * @param bucket The name of the bucket to upload to
  * @param key The key to use for the upload
  */
-class S3UploadSink(s3Client: AmazonS3Client, bucket: String, key: String, adapter: LoggingAdapter)(implicit ec: ExecutionContext) extends AsyncStage[ByteString, Int, Option[Throwable]] {
+class S3AsyncStage(s3Client: AmazonS3Client, bucket: String, key: String, adapter: LoggingAdapter)(implicit ec: ExecutionContext) extends AsyncStage[ByteString, Int, Option[Throwable]] {
 
   val retries = 2
   sealed trait UploadState
