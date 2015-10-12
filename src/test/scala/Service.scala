@@ -27,7 +27,7 @@ trait Service {
       extractRequest { request =>
         complete {
           println(s"Request is: ${request.entity.isChunked()}")
-            val aws = new AWSWrapper( "com.3dr.publictest", "", logger)
+            val aws = new AWSWrapper( "com.3dr.publictest", "")
 
           request.entity.dataBytes.transform( () => aws.multipartUploadTransform("gimbaltest4k.mpeg")).runWith(Sink.ignore)
           StatusCodes.OK

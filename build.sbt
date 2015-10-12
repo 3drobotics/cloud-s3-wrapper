@@ -1,4 +1,4 @@
-name := "AWSWrapper"
+name := "stream-s3-wrapper"
 
 version := "1.0"
 

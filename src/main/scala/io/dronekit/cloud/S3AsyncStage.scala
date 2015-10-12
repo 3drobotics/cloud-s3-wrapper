@@ -20,14 +20,21 @@ import scala.util.{Failure, Success}
  */
 
 /**
- * An Akka Streams Sink which uploads a ByteString to S3 as a multipart upload.
+ * An Akka AsyncStage which uploads a ByteString to S3 as a multipart upload.
  * @param s3Client The S3 client to use to connect to S3
  * @param bucket The name of the bucket to upload to
  * @param key The key to use for the upload
+ * @param adapter a logger for debug messages
+ *
+ * This stage has a 10MB buffer for input data, as the buffer fills up, each chunk is uploaded to s3.
+ * Each uploaded chunk is kept track of in the chunkMap. When all the parts in the chunkMap are uploaded
+ * the stream finishes.
  */
-class S3AsyncStage(s3Client: AmazonS3Client, bucket: String, key: String, adapter: LoggingAdapter)(implicit ec: ExecutionContext) extends AsyncStage[ByteString, Int, Option[Throwable]] {
+class S3AsyncStage(s3Client: AmazonS3Client, bucket: String, key: String, adapter: LoggingAdapter)
+                  (implicit ec: ExecutionContext) extends AsyncStage[ByteString, Int, Option[Throwable]] {
 
-  val retries = 2
+  val retries = 2 // number of retries for each s3 part
+
   sealed trait UploadState
   case object UploadStarted extends UploadState
   case class UploadFailed(ex: Throwable) extends UploadState
@@ -37,13 +44,15 @@ class S3AsyncStage(s3Client: AmazonS3Client, bucket: String, key: String, adapte
   case class UploadResult(number: Long, state: UploadState, etag: Option[PartETag] = None)
 
   val MaxQueueSize = 10
-  val MaxBufferSize = 1024 * 1024 * 10 // 10 MiB
+  val MaxBufferSize = 1024 * 1024 * 10 // 10 MB
   val chunkMap = new mutable.LongMap[UploadChunk](MaxQueueSize)
   var buffer = ByteString.empty
   var partNumber = 1
   var partEtags = List[UploadResult]()
   val uploadRequest = new InitiateMultipartUploadRequest(bucket, key)
   var multipartUpload: Option[InitiateMultipartUploadResult] = None
+
+  // wrap java s3 client in a try so we can abort the stage
   try {
     multipartUpload = Some(s3Client.initiateMultipartUpload(uploadRequest))
   } catch {
@@ -53,8 +62,13 @@ class S3AsyncStage(s3Client: AmazonS3Client, bucket: String, key: String, adapte
   }
 
   var multipartCompleted = false
-  private var onLastChunk = false
 
+  /**
+   * Callback for when each part is done uploading
+   * @param event has an error if the multipart upload failed, stage will abort
+   * @param ctx async stage context
+   * @return when all parts are done uploading, finishes the stage
+   */
   override def onAsyncInput(event: Option[Throwable], ctx: AsyncContext[Int, Option[Throwable]]): Directive = {
     if (event.nonEmpty) {
       abortUpload()
@@ -77,39 +91,64 @@ class S3AsyncStage(s3Client: AmazonS3Client, bucket: String, key: String, adapte
     }
   }
 
+  /**
+   * When data comes into the stage, initiate upload if the butter is full.
+   * @param elem input data
+   * @param ctx async context stage
+   * @return pulls more data
+   */
   override def onPush(elem: ByteString, ctx: AsyncContext[Int, Option[Throwable]]): UpstreamDirective = {
     buffer ++= elem
 
     if (buffer.length > MaxBufferSize) {
       uploadBuffer(ctx.getAsyncCallback())
-      ctx.pull()
-    } else {
-      // get more data
-      ctx.pull()
     }
+
+    // get more data
+    ctx.pull()
   }
 
+  /**
+   * When downstream pulls for data, do nothing. If the stream is done, do the final upload buffer
+   * @param ctx
+   * @return always holds the downstream
+   */
   override def onPull(ctx: AsyncContext[Int, Option[Throwable]]): DownstreamDirective = {
     if (ctx.isFinishing) {
-      onLastChunk = true
       uploadBuffer(ctx.getAsyncCallback())
-
-      ctx.holdDownstream()
-    } else {
-      ctx.holdDownstream()
     }
+    ctx.holdDownstream()
   }
 
+  /**
+   * override the termination because upstream will finish reading data before we are done uploading it to s3
+   * @param ctx
+   * @return
+   */
   override def onUpstreamFinish(ctx: AsyncContext[Int, Option[Throwable]]): TerminationDirective = {
     ctx.absorbTermination()
   }
 
+  /**
+   * Set a part in the chunkmap as complete
+   * @param partNumber number of the chunk
+   * @param etag etag of the chunk
+   */
   def setPartCompleted(partNumber: Long, etag: Option[PartETag]): Unit = {
     chunkMap(partNumber) = UploadChunk(partNumber, ByteString.empty, UploadCompleted, etag)
   }
 
-  private def uploadPartToAmazon(buffer: ByteString, partNumber: Int, s3Client: AmazonS3Client,
-                                 multipartId: String, bucket: String, key: String, retryNum: Int = 0): Future[Unit] = {
+  /**
+   * Upload a buffer of data into s3, retries 2 times by default
+   * @param buffer data to upload
+   * @param partNumber the chunk for the chunkMap
+   * @param multipartId id of the multipart upload
+   * @param bucket s3 bucket name
+   * @param key name of file
+   * @return the etag of the part upload
+   */
+  private def uploadPartToAmazon(buffer: ByteString, partNumber: Int,
+                                 multipartId: String, bucket: String, key: String): Future[Unit] = {
     val futureWrapper = Promise[Unit]()
 
     def uploadHelper(retryNumLocal: Int) {
@@ -146,7 +185,7 @@ class S3AsyncStage(s3Client: AmazonS3Client, bucket: String, key: String, adapte
       }
     }
 
-    uploadHelper(retryNum)
+    uploadHelper(0)
 
     futureWrapper.future
   }
@@ -170,13 +209,17 @@ class S3AsyncStage(s3Client: AmazonS3Client, bucket: String, key: String, adapte
     adapter.debug(s"Completed upload: $result")
   }
 
+  /**
+   * upload part to s3 and return the result to the async stage callback
+   * @param asyncCb async stage callback
+   */
   private def uploadBuffer(asyncCb: AsyncCallback[Option[Throwable]]): Future[Unit] = {
     if (multipartUpload.isEmpty) {
       asyncCb.invoke(Some(new AWSException("Could not initiate multipart upload")))
       Future {}
     } else {
       chunkMap(partNumber) = UploadChunk(partNumber, buffer, UploadStarted, None)
-      val uploadFuture = uploadPartToAmazon(buffer, partNumber, s3Client, multipartUpload.get.getUploadId, bucket, key)
+      val uploadFuture = uploadPartToAmazon(buffer, partNumber, multipartUpload.get.getUploadId, bucket, key)
       partNumber += 1
       buffer = ByteString.empty
 
