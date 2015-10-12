@@ -64,11 +64,8 @@ class AWSWrapper(val awsBucket: String, val awsPathPrefix: String, S3Client: Ama
 
   def getObject(key: String): Future[Array[Byte]] = {
     Future {
-      println(s"key ${key}")
       val obj = S3Client.getObject(awsBucket, awsPathPrefix+key)
       toByteArray(obj.getObjectContent)
-
-//      Stream.continually(obj.getObjectContent.read).takeWhile(_ != -1).map(_.toByte).toArray
     }
   }
 
