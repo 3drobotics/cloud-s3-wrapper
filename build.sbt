@@ -1,4 +1,4 @@
-name := "S3UploadSink"
+name := "stream-s3-wrapper"
 
 version := "1.0"
 

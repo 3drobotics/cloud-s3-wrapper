@@ -3,9 +3,9 @@ import akka.event.LoggingAdapter
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.Sink
+import akka.stream.scaladsl.{Source, Sink}
 import com.amazonaws.services.s3.AmazonS3Client
-import io.dronekit.cloud.S3UploadSink
+import io.dronekit.AWSWrapper
 
 import scala.concurrent.ExecutionContextExecutor
 import scala.language.postfixOps
@@ -27,8 +27,9 @@ trait Service {
       extractRequest { request =>
         complete {
           println(s"Request is: ${request.entity.isChunked()}")
-          val sink = Sink.actorSubscriber(S3UploadSink.props(s3Client, "com.3dr.publictest", "gimbaltest4k.mpeg"))
-          request.entity.getDataBytes().runWith(sink, materializer)
+            val aws = new AWSWrapper( "com.3dr.publictest", "")
+
+          request.entity.dataBytes.transform( () => aws.multipartUploadTransform("gimbaltest4k.mpeg")).runWith(Sink.ignore)
           StatusCodes.OK
         }
       }
