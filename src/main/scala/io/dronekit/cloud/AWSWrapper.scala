@@ -1,4 +1,4 @@
-package io.dronekit
+package io.dronekit.cloud
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
 import akka.actor.ActorSystem
@@ -8,7 +8,7 @@ import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.stage.AsyncStage
 import akka.util.ByteString
 import com.amazonaws.services.s3.AmazonS3Client
-import com.amazonaws.services.s3.model.ObjectMetadata
+import com.amazonaws.services.s3.model.{AmazonS3Exception, ObjectMetadata}
 import org.joda.time.DateTime
 
 import scala.concurrent.{Promise, ExecutionContext, Future}
@@ -22,6 +22,15 @@ import scala.util.{Failure, Success}
 class AWSException(msg: String) extends RuntimeException
 
 /**
+ * case class representing an internal S3 location
+ * @param bucket The name of the bucket
+ * @param key The name of the key
+ */
+case class S3URL(bucket: String, key: String) {
+  override def toString = s"s3://$bucket/$key"
+}
+
+/**
  * Container for the actual AWS client (which can't be mocked easily)
  */
 object S3  {
@@ -31,7 +40,8 @@ object S3  {
 /**
  * Wrapper object around AWS client to allow mocking
  */
-class AWSWrapper(val awsBucket: String, val awsPathPrefix: String, S3Client: AmazonS3Client = S3.client)(implicit ec: ExecutionContext) {
+class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
+                (implicit ec: ExecutionContext, logger: LoggingAdapter) {
   implicit val system = ActorSystem()
   implicit val materializer = ActorMaterializer()
   implicit val adapter: LoggingAdapter = Logging(system, "AWSWrapper")
@@ -49,65 +59,83 @@ class AWSWrapper(val awsBucket: String, val awsPathPrefix: String, S3Client: Ama
     buffer.toByteArray
   }
 
-  def getObjectS3URL(s3url: String): Future[Array[Byte]] = {
-    val bucket = s3url.stripPrefix("s3://").split("/")(0)
-    val key = s3url.stripPrefix("s3://").split("/").tail.mkString("/")
-    getObject(bucket, key)
-  }
-
-  private def getObject(bucket: String, key: String): Future[Array[Byte]] = {
+  /**
+   * Get an object from S3 as a byte array
+   * @param s3url The location of the object in S3
+   * @return A byte array
+   */
+  def getObject(s3url: S3URL): Future[Array[Byte]] = {
     Future {
-      val obj = S3Client.getObject(bucket, key)
+      val obj = S3Client.getObject(s3url.bucket, s3url.key)
       toByteArray(obj.getObjectContent)
     }
   }
 
-  def getObject(key: String): Future[Array[Byte]] = {
+  /**
+   * Return an input stream to an object located in S3
+   * @param s3url The url of the form s3://bucketname/key
+   * @return an InputStream for the found object
+   */
+  def getObjectAsInputStream(s3url: S3URL): Future[InputStream] = {
     Future {
-      val obj = S3Client.getObject(awsBucket, awsPathPrefix+key)
-      toByteArray(obj.getObjectContent)
+      try
+        S3Client.getObject(s3url.bucket, s3url.key).getObjectContent
+      catch {
+        case ex: AmazonS3Exception =>
+          logger.error(ex, s"Failed to get $s3url")
+          throw ex
+      }
     }
   }
 
-  def getObjectMetadata(key:String): Future[ObjectMetadata] = {
+  def getObjectMetadata(s3url: S3URL): Future[ObjectMetadata] = {
     Future {
-      S3Client.getObjectMetadata(awsBucket, awsPathPrefix+key)
+      S3Client.getObjectMetadata(s3url.bucket, s3url.key)
     }
   }
 
-  def getObjectAsInputStream(s3url: String): Future[InputStream] = {
-    val bucket = s3url.stripPrefix("s3://").split("/")(0)
-    val key = s3url.stripPrefix("s3://").split("/").tail.mkString("/")
-    Future {S3Client.getObject(bucket, key).getObjectContent}
-  }
-
-  def insertIntoBucket(name: String, data: ByteString): Future[String] = {
+  /**
+   * Insert an object into the bucket
+   * @param key The location in the bucket to save the object
+   * @param data The data to insert
+   * @return The S3 URL (of the form s3://bucketname/key)
+   */
+  def insertIntoBucket(key: String, data: ByteString): Future[S3URL] = {
     val dataInputStream = new ByteArrayInputStream(data.toByteBuffer.array())
     Future {
-      S3Client.putObject(awsBucket, awsPathPrefix+name, dataInputStream, new ObjectMetadata())
-      S3Client.getUrl(awsBucket, awsPathPrefix+name).toString
+      val metadata = new ObjectMetadata()
+      metadata.setContentLength(data.length.toLong)
+      S3Client.putObject(awsBucket, key, dataInputStream, metadata)
+      S3URL(awsBucket, key)
     }
   }
 
-  def getSignedUrl(key: String, expiration: java.util.Date = new DateTime().plusHours(2).toDate): Future[String] = {
+  /**
+   * Return a signed URL for the object in the configured bucket with key
+   * @param s3url The location in S3 of the object
+   * @return A HTTP url for the object. Will time out!
+   */
+  def getSignedUrl(s3url: S3URL): Future[String] = {
+    val expiration: java.util.Date = new DateTime().plusHours(2).toDate
     Future {
-      val ret = S3Client.generatePresignedUrl(awsBucket, awsPathPrefix+key, expiration)
+      val ret = S3Client.generatePresignedUrl(s3url.bucket, s3url.key, expiration)
       ret.toString
     }
   }
 
-  def streamInsertIntoBucket(dataSource: Source[ByteString, Any], key: String): Future[String] = {
-    val p = Promise[String]()
-    val streamRes = dataSource.transform(()=> multipartUploadTransform(key)).runWith(Sink.ignore)
+  def streamInsertIntoBucket(dataSource: Source[ByteString, Any], key: String): Future[S3URL] = {
+    val p = Promise[S3URL]()
+    val s3url = S3URL(awsBucket, key)
+    val streamRes = dataSource.transform(()=> multipartUploadTransform(s3url)).runWith(Sink.ignore)
     streamRes.onComplete{
-      case Success(x) => p.success(S3Client.getUrl(awsBucket, awsPathPrefix+key).toString)
+      case Success(x) => p.success(s3url)
       case Failure(ex) => p.failure(ex)
     }
     p.future
   }
 
-  def multipartUploadTransform(key: String): AsyncStage[ByteString, Int, Option[Throwable]] = {
-    new S3AsyncStage(S3Client, awsBucket, awsPathPrefix+key, adapter)
+  def multipartUploadTransform(s3url: S3URL): AsyncStage[ByteString, Int, Option[Throwable]] = {
+    new S3AsyncStage(S3Client, s3url.bucket, s3url.key, adapter)
   }
 
 }

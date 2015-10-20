@@ -1,9 +1,9 @@
-package io.dronekit
+package io.dronekit.cloud
 
 import java.io.ByteArrayInputStream
 import java.util
 
-import akka.event.{LoggingAdapter}
+import akka.event.LoggingAdapter
 import akka.stream.stage._
 import akka.util.ByteString
 import com.amazonaws.services.s3.AmazonS3Client
@@ -11,7 +11,7 @@ import com.amazonaws.services.s3.model._
 
 import scala.collection.JavaConversions._
 import scala.collection._
-import scala.concurrent.{Promise, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
 /**
@@ -70,7 +70,7 @@ class S3AsyncStage(s3Client: AmazonS3Client, bucket: String, key: String, adapte
    * @return when all parts are done uploading, finishes the stage
    */
   override def onAsyncInput(event: Option[Throwable], ctx: AsyncContext[Int, Option[Throwable]]): Directive = {
-    if (event.nonEmpty) {
+    if (event.isDefined) {
       abortUpload()
       ctx.fail(event.get)
     } else {
@@ -176,9 +176,9 @@ class S3AsyncStage(s3Client: AmazonS3Client, bucket: String, key: String, adapte
         case Failure(ex) => {
           // try again
           if (retryNumLocal >= retries) {
-            futureWrapper.failure(new AWSException(s"Uploading part failed for part ${partNumber} and multipartId: ${multipartId}"))
+            futureWrapper.failure(new AWSException(s"Uploading part failed for part $partNumber and multipartId: ${multipartId}"))
           } else {
-            adapter.debug(s"Retrying upload on part ${partNumber}, on retry ${retryNumLocal}")
+            adapter.debug(s"Retrying upload on part $partNumber, on retry $retryNumLocal")
             uploadHelper(retryNumLocal + 1)
           }
         }
@@ -226,7 +226,7 @@ class S3AsyncStage(s3Client: AmazonS3Client, bucket: String, key: String, adapte
       uploadFuture.onComplete{
         case Success(x) => asyncCb.invoke(None)
         case Failure(ex) => {
-          adapter.debug(s"Upload future got failure ${ex}")
+          adapter.debug(s"Upload future got failure $ex")
           asyncCb.invoke(Some(ex))
         }
       }
