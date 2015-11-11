@@ -1,6 +1,6 @@
 name := "stream-s3-wrapper"
 
-version := "1.1"
+version := "2.0"
 
 scalaVersion := "2.11.7"
 
@@ -8,8 +8,10 @@ organization := "io.dronekit"
 
 resolvers += "Artifactory" at "https://dronekit.artifactoryonline.com/dronekit/libs-snapshot-local/"
 
-credentials += Credentials("Artifactory Realm", "dronekit.artifactoryonline.com", "publish", "Km4-PSH-aEM-6Fm")
+credentials += Credentials(Path.userHome / ".sbt" / ".credentials")
+
 isSnapshot := true
+
 publishTo := {
   val artifactory = "https://dronekit.artifactoryonline.com/"
   if (isSnapshot.value)
@@ -19,8 +21,8 @@ publishTo := {
 }
 
 libraryDependencies ++= {
-  val akkaV = "2.3.12"
-  val akkaStreamV = "1.0"
+  val akkaV = "2.4.0"
+  val akkaStreamV = "2.0-M1"
   val scalaTestV = "2.2.4"
   Seq(
     "com.typesafe.akka" %% "akka-actor" % akkaV,
@@ -29,8 +31,8 @@ libraryDependencies ++= {
     "com.typesafe.akka" %% "akka-http-experimental" % akkaStreamV,
     "com.typesafe.akka" %% "akka-http-spray-json-experimental" % akkaStreamV,
     "com.typesafe.akka" %% "akka-http-testkit-experimental" % akkaStreamV,
-    "com.amazonaws" % "aws-java-sdk-s3" % "1.10.11",
-    "joda-time" % "joda-time" % "2.8.2",
+    "com.amazonaws" % "aws-java-sdk-s3" % "1.10.32",
+    "joda-time" % "joda-time" % "2.8.1",
     "org.scalatest" %% "scalatest" % "2.2.4" % "test"
   )
 }

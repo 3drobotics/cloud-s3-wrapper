@@ -21,7 +21,7 @@ object TestClient extends App {
   val logger = Logging(system, getClass)
 
 
-  val file = new File("/Users/jiahuang/3dr/stream-s3-uploader/src/test/resources/recap_res.obj.zip")
+  val file = new File("/Users/jasonmartens/Downloads/Star wars.mp4")
   logger.info(s"Reading file of size: ${file.length()}")
   val imageSource = SynchronousFileSource(file).map {data => print("."); data}
   val entity = HttpEntity.Chunked.fromData(ContentTypes.`application/octet-stream`, imageSource)

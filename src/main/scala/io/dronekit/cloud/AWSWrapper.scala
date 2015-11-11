@@ -3,12 +3,12 @@ package io.dronekit.cloud
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
 import akka.actor.ActorSystem
 import akka.event.{Logging, LoggingAdapter}
-import akka.stream.ActorMaterializer
+import akka.stream.{FlowShape, ActorMaterializer}
 import akka.stream.scaladsl.{Sink, Source}
-import akka.stream.stage.AsyncStage
+import akka.stream.stage.{GraphStage}
 import akka.util.ByteString
 import com.amazonaws.services.s3.AmazonS3Client
-import com.amazonaws.services.s3.model.{AmazonS3Exception, ObjectMetadata}
+import com.amazonaws.services.s3.model.{UploadPartResult, AmazonS3Exception, ObjectMetadata}
 import org.joda.time.DateTime
 
 import scala.concurrent.{Promise, ExecutionContext, Future}
@@ -126,7 +126,7 @@ class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
   def streamInsertIntoBucket(dataSource: Source[ByteString, Any], key: String): Future[S3URL] = {
     val p = Promise[S3URL]()
     val s3url = S3URL(awsBucket, key)
-    val streamRes = dataSource.transform(()=> multipartUploadTransform(s3url)).runWith(Sink.ignore)
+    val streamRes = dataSource.via(multipartUploadTransform(s3url)).runWith(Sink.ignore)
     streamRes.onComplete{
       case Success(x) => p.success(s3url)
       case Failure(ex) => p.failure(ex)
@@ -134,8 +134,8 @@ class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
     p.future
   }
 
-  def multipartUploadTransform(s3url: S3URL): AsyncStage[ByteString, Int, Option[Throwable]] = {
-    new S3AsyncStage(S3Client, s3url.bucket, s3url.key, adapter)
+  def multipartUploadTransform(s3url: S3URL): GraphStage[FlowShape[ByteString, UploadPartResult]] = {
+    new S3UploadFlow(S3Client, s3url.bucket, s3url.key, adapter)
   }
 
 }
