@@ -27,16 +27,14 @@ trait Service {
   val routes = pathPrefix("upload") {
     post {
       extractRequest { request =>
-          onComplete(request.entity.dataBytes
-            .via(aws.multipartUploadTransform(S3URL("com.3dr.publictest", "gimbaltest4k.mpeg")))
-            .grouped(Int.MaxValue)
-            .runWith(Sink.head)
-          ) {
-            case scala.util.Success(result) =>
-              println(s"Got result: $result")
-              complete(OK)
-            case scala.util.Failure(ex) => println(s"caught exception $ex"); complete(ex)
-          }
+        val resultFuture = request.entity.dataBytes
+          .via(aws.multipartUploadTransform(S3URL("com.3dr.publictest", "gimbaltest4k.mpeg")))
+          .grouped(Int.MaxValue)
+          .runWith(Sink.head)
+        onSuccess(resultFuture) { result =>
+            println(s"Got result: $result")
+            complete(OK)
+        }
       }
     }
   }

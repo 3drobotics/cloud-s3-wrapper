@@ -28,7 +28,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
   implicit val logger = Logging.getLogger(system = system, logSource = getClass)
   val aws = new AWSWrapper(bucketName)
   val s3url = S3URL(bucketName, "some_random_data.txt")
-  implicit val timeout = 200 seconds
+  implicit val timeout = 10 seconds
 
   val randomString = Random.alphanumeric.take(150000).mkString
   val randomStringIterator = randomString.iterator
@@ -41,9 +41,12 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
 //      val res = data
         .map{chunk => println(s"sending chunk of size ${chunk.length}"); chunk}
         .via(aws.multipartUploadTransform(s3url))
-        .runWith(Sink.ignore)
+        .map{partResult => println(s"Part Result: $partResult"); partResult}
+        .grouped(100000)
+        .runWith(Sink.head)
 
-      Await.ready(res, timeout)
+      val result = Await.result(res, timeout)
+      println(s"Result: $result")
 
       val randomDataRes = Await.result(aws.getObject(s3url), 60 seconds)
       assert(ByteString(randomDataRes).decodeString("US-ASCII") == randomString)

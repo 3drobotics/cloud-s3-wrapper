@@ -16,25 +16,21 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Try, Failure, Success}
 
 /**
-  * Created by Jason Martens <jason.martens@3drobotics.com> on 8/18/15.
-  *
-  */
-
-object S3UploadFlow {
-
-}
+ * Created by Jason Martens <jason.martens@3drobotics.com> on 8/18/15.
+ *
+ */
 
 /**
-  * An Akka GraphStage which uploads a ByteString to S3 as a multipart upload.
-  * @param s3Client The S3 client to use to connect to S3
-  * @param bucket The name of the bucket to upload to
-  * @param key The key to use for the upload
-  * @param logger a logger for debug messages
-  *
-  *               This stage has a 10MB buffer for input data, as the buffer fills up, each chunk is uploaded to s3.
-  *               Each uploaded chunk is kept track of in the chunkMap. When all the parts in the chunkMap are uploaded
-  *               the stream finishes.
-  */
+ * An Akka GraphStage which uploads a ByteString to S3 as a multipart upload.
+ * @param s3Client The S3 client to use to connect to S3
+ * @param bucket The name of the bucket to upload to
+ * @param key The key to use for the upload
+ * @param logger a logger for debug messages
+ *
+ *               This stage has a 10MB buffer for input data, as the buffer fills up, each chunk is uploaded to s3.
+ *               Each uploaded chunk is kept track of in the chunkMap. When all the parts in the chunkMap are uploaded
+ *               the stream finishes.
+ */
 class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger: LoggingAdapter)
                   (implicit ec: ExecutionContext) extends GraphStage[FlowShape[ByteString, UploadPartResult]] {
   val in: Inlet[ByteString] = Inlet("S3UploadFlow.in")
@@ -65,7 +61,7 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
       val chunkMap = new mutable.LongMap[UploadChunk](MaxQueueSize)
       var buffer = ByteString.empty
       var partNumber = 1
-      var partEtags = List[UploadResult]()
+      //      var partEtags = List[UploadResult]()
       val uploadRequest = new InitiateMultipartUploadRequest(bucket, key)
       var multipartUpload: Option[InitiateMultipartUploadResult] = None
       var uploadResults: List[UploadPartResult] = List()
@@ -78,54 +74,71 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
         case ex: Throwable => logger.debug(s"s3Client.initiateMultipartUpload failed with $ex")
       }
 
-      var multipartCompleted = false
       val callback = getAsyncCallback(onAsyncInput)
 
       setHandler(in, new InHandler {
+        /**
+         * Buffer elements until we have the minimum size we would like to upload to S3
+         */
         override def onPush(): Unit = {
           val elem = grab(in)
           buffer ++= elem
 
           if (buffer.length > MinUploadChunkSize) {
             val uploadFuture = uploadBuffer(callback)
-            println(s"uploadBuffer returned $uploadFuture")
-            uploadFuture.onSuccess{ case result => onAsyncInput(Success(result))}
-            uploadFuture.onFailure{ case result => onAsyncInput(Failure(result))}
-//            uploadFuture.onComplete(onAsyncInput)
+            uploadFuture.onComplete(onAsyncInput)
           }
-
-          // get more data
-          pull(in)
+          pushAndPull()
         }
 
-        override def onUpstreamFinish(): Unit =
-          // Upload whatever is left in the buffer
+        override def onUpstreamFinish(): Unit = {
+          println("onUpstreamFinish")
+          // Upload whatever is left in the buffer, since we will not be getting any more data
           uploadBuffer(callback).onComplete(onAsyncInput)
+          pushAndPull()
+        }
       })
 
       setHandler(out, new OutHandler {
-        /**
-          * When downstream pulls for data, do nothing. If the stream is done, do the final upload buffer
-          * @return always holds the downstream
-          */
         override def onPull(): Unit = {
-          pull(in)
-          pushResults()
+          println("onPull")
+          pushAndPull()
         }
       })
 
-      private def pushResults(): Unit = {
-        if (uploadResults.nonEmpty && isAvailable(out)) {
+      /**
+       * Push any available data to the out port, and pull if the in port is available.
+       * When all chunks are completed, also complete the upload and the stage.
+       */
+      private def pushAndPull(): Unit = {
+        if (uploadResults.nonEmpty && !isClosed(out) && isAvailable(out)) {
+          println(s"pushing ${uploadResults.head} to out port")
           push(out, uploadResults.head)
           uploadResults = uploadResults.tail
+        }
+        if (!isAvailable(in) && !isClosed(in)) {
+          println("pulling for more data")
+          pull(in)
+        }
+
+        if (outstandingChunks == 0 && isClosed(in)) {
+          try {
+            println("All chunks complete and in isClosed")
+            completeUpload()
+            completeStage()
+          } catch {
+            case ex: Throwable =>
+              logger.error(ex, s"Upload failed to s3://$bucket/$key while trying to complete")
+              abortUpload()
+              failStage(ex)
+          }
         }
       }
 
 
       /**
-        * Callback for when each part is done uploading
-        * @return when all parts are done uploading, finishes the stage
-        */
+       * Callback for when each part is done uploading
+       */
       private def onAsyncInput(input: Try[UploadPartResult]): Unit = input match {
         case Failure(ex) =>
           logger.error(ex, s"Upload failed to s3://$bucket/$key")
@@ -134,35 +147,20 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
         case Success(result) =>
           println("onAsyncInput success")
           uploadResults = uploadResults :+ result
-          pushResults()
-          if (outstandingChunks == 0 && isClosed(in)) {
-            try {
-              completeUpload()
-              completeStage()
-            } catch {
-              case ex: Throwable =>
-                logger.error(ex, s"Upload failed to s3://$bucket/$key while trying to complete")
-                abortUpload()
-                failStage(ex)
-            }
-          } else {
-            logger.debug(s"Completed part")
-            // future completed
-          }
-      }
+          setPartCompleted(result.getPartNumber, Some(result.getPartETag))
+          logger.debug(s"Completed part")
+          pushAndPull()
 
+      }
 
       /**
-        * Set a part in the chunkmap as complete
-        * @param partNumber number of the chunk
-        * @param etag etag of the chunk
-        */
-      def setPartCompleted(partNumber: Long, etag: Option[PartETag]): Unit = {
+       * Set a part in the chunkmap as complete
+       * @param partNumber number of the chunk
+       * @param etag etag of the chunk
+       */
+      private def setPartCompleted(partNumber: Long, etag: Option[PartETag]): Unit = {
         chunkMap(partNumber) = UploadChunk(partNumber, ByteString.empty, UploadCompleted, etag)
       }
-
-
-
 
       private def outstandingChunks: Long = {
         chunkMap.filter { case (part, chunk) => chunk.state != UploadCompleted }.toList.length
@@ -178,7 +176,7 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
         val etagArrayList: util.ArrayList[PartETag] = new util.ArrayList[PartETag](etagList.toIndexedSeq)
         val completeRequest = new CompleteMultipartUploadRequest(bucket, key, multipartUpload.get.getUploadId, etagArrayList)
         val result = s3Client.completeMultipartUpload(completeRequest)
-        multipartCompleted = true
+        //        multipartCompleted = true
         logger.debug(s"Completed upload: $result")
       }
 
@@ -187,20 +185,13 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
       private def uploadBuffer(asyncCb: AsyncCallback[Try[UploadPartResult]]): Future[UploadPartResult] = {
         if (multipartUpload.isEmpty) {
           Future.failed(new AWSException("Could not initiate multipart upload"))
-//          asyncCb.invoke(Failure())
         } else {
+          println("uploadBuffer")
           chunkMap(partNumber) = UploadChunk(partNumber, buffer, UploadStarted, None)
-          val uploadFuture = uploadPartToAmazon(buffer, partNumber, multipartUpload.get.getUploadId, bucket, key, retries, s3Client)
+          val uploadFuture = uploadPartToAmazon(buffer, partNumber, multipartUpload.get.getUploadId, bucket, key)
           partNumber += 1
           buffer = ByteString.empty
           uploadFuture
-//          uploadFuture.onComplete {asyncCb.invoke}
-//            case Success(result) =>
-//              asyncCb.invoke(Success(result))
-//            case Failure(ex) =>
-//              logger.debug(s"Upload future got failure $ex")
-//              asyncCb.invoke(Failure(ex))
-//          }
         }
       }
 
@@ -214,7 +205,7 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
        * @return the etag of the part upload
        */
       private def uploadPartToAmazon(buffer: ByteString, partNumber: Int, multipartId: String, bucket: String,
-                                     key: String, retries: Int, s3Client: AmazonS3Client): Future[UploadPartResult] = {
+                                     key: String): Future[UploadPartResult] = {
 
         //    val futureWrapper = Promise[UploadPartResult]()
 
@@ -224,7 +215,9 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
             Future.failed(new AWSException(s"Uploading part failed for part $partNumber and multipartId: $multipartId"))
           else {
             val inputStream = new ByteArrayInputStream(buffer.toArray[Byte])
-            Future {println("Hello")}
+            Future {
+              println("Hello")
+            }
             val uploadFuture = Future {
               val partUploadRequest = new UploadPartRequest()
                 .withBucketName(bucket)

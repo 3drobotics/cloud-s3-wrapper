@@ -23,7 +23,7 @@ object TestClient extends App {
 
   val file = new File("/Users/jasonmartens/Downloads/Star wars.mp4")
   logger.info(s"Reading file of size: ${file.length()}")
-  val imageSource = SynchronousFileSource(file).map {data => print("."); data}
+  val imageSource = SynchronousFileSource(file)
   val entity = HttpEntity.Chunked.fromData(ContentTypes.`application/octet-stream`, imageSource)
   val request = HttpRequest(method = HttpMethods.POST, uri = "http://localhost:9090/upload", entity = entity)
   val responseFuture = Http().singleRequest(request)
