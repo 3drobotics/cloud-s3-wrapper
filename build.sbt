@@ -33,6 +33,6 @@ libraryDependencies ++= {
     "com.typesafe.akka" %% "akka-http-testkit-experimental" % akkaStreamV,
     "com.amazonaws" % "aws-java-sdk-s3" % "1.10.32",
     "joda-time" % "joda-time" % "2.8.1",
-    "org.scalatest" %% "scalatest" % "2.2.4" % "test"
+    "org.scalatest" %% "scalatest" % scalaTestV % "test"
   )
 }

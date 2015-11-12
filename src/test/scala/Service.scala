@@ -17,23 +17,27 @@ import scala.language.postfixOps
  */
 trait Service {
   implicit val system: ActorSystem
-  implicit def executor: ExecutionContextExecutor
+  implicit val executor: ExecutionContextExecutor
   implicit val materializer: ActorMaterializer
   implicit val logger: LoggingAdapter
 
-  val aws = new AWSWrapper( "com.3dr.publictest")
+  lazy val aws = new AWSWrapper( "com.3dr.publictest")
 
 
-  val routes = pathPrefix("upload") {
+  lazy val routes = pathPrefix("upload") {
     post {
       extractRequest { request =>
         val resultFuture = request.entity.dataBytes
           .via(aws.multipartUploadTransform(S3URL("com.3dr.publictest", "gimbaltest4k.mpeg")))
-          .grouped(Int.MaxValue)
+          .map{part => println(s"completed part $part"); part}
           .runWith(Sink.head)
-        onSuccess(resultFuture) { result =>
+        onComplete(resultFuture) {
+          case scala.util.Success(result) =>
             println(s"Got result: $result")
             complete(OK)
+          case scala.util.Failure(ex) =>
+            logger.error(ex, "Failed to complete upload stream")
+            complete(ex)
         }
       }
     }

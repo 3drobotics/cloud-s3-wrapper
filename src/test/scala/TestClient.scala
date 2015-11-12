@@ -9,6 +9,7 @@ import akka.stream.io.SynchronousFileSource
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import scala.io.StdIn
 
 /**
  * Created by Jason Martens <jason.martens@3drobotics.com> on 8/26/15.
@@ -27,7 +28,9 @@ object TestClient extends App {
   val entity = HttpEntity.Chunked.fromData(ContentTypes.`application/octet-stream`, imageSource)
   val request = HttpRequest(method = HttpMethods.POST, uri = "http://localhost:9090/upload", entity = entity)
   val responseFuture = Http().singleRequest(request)
-  // TODO: How to cleanly shutdown system after stream completes?
-  val result = Await.result(responseFuture, 1 hour)
+  val result = Await.result(responseFuture, 30 seconds)
   logger.info(s"Result: $result")
+
+  StdIn.readLine("done?")
+  system.terminate()
 }

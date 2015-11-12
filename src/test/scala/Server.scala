@@ -4,6 +4,8 @@ import akka.http.scaladsl.Http
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Source
 
+import scala.io.StdIn
+
 /**
  * Created by Jason Martens <jason.martens@3drobotics.com> on 8/17/15.
  *
@@ -16,4 +18,7 @@ object Server extends App with Service {
   override val logger = Logging(system, getClass)
 
   Http().bindAndHandle(routes, "0.0.0.0", 9090)
+
+  StdIn.readLine("done?")
+  system.terminate()
 }
