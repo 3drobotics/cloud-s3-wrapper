@@ -28,7 +28,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
   implicit val logger = Logging.getLogger(system = system, logSource = getClass)
   val aws = new AWSWrapper(bucketName)
   val s3url = S3URL(bucketName, "some_random_data.txt")
-  implicit val timeout = 10 seconds
+  implicit val timeout = 30 seconds
 
   val randomString = Random.alphanumeric.take(150000).mkString
   val randomStringIterator = randomString.iterator
@@ -38,13 +38,8 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
     "handle all messages" in {
 
       val res = Source(() => randomStringIterator).grouped(100).map(chunk => ByteString(chunk.mkString))
-//      val res = data
         .map{chunk => println(s"sending chunk of size ${chunk.length}"); chunk}
-        .via(aws.multipartUploadTransform(s3url))
-        .map{partResult => println(s"Part Result: $partResult"); partResult}
-        .grouped(100000)
-        .runWith(Sink.head)
-
+        .via(aws.multipartUploadTransform(s3url)).runWith(Sink.ignore)
       val result = Await.result(res, timeout)
       println(s"Result: $result")
 
@@ -59,10 +54,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
       val imageSource = SynchronousFileSource(file)
 
       val smallFile = S3URL(bucketName, "smallfile.txt")
-      val res = imageSource
-        .via(aws.multipartUploadTransform(smallFile))
-        .runWith(Sink.ignore)
-
+      val res = imageSource.via(aws.multipartUploadTransform(smallFile)).runWith(Sink.ignore)
       Await.ready(res, timeout)
       // check for md5
       val metadataRes = Await.result(aws.getObjectMetadata(smallFile), 60 seconds)
@@ -86,9 +78,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
       val finnikyUpload = new AWSWrapper(bucketName, new FakeS3())
 
       val randomDataUrl = S3URL(bucketName, "random_data_2.txt")
-      val res = data
-        .via(finnikyUpload.multipartUploadTransform(randomDataUrl))
-        .runWith(Sink.ignore)
+      val res = data.via(finnikyUpload.multipartUploadTransform(randomDataUrl)).runWith(Sink.ignore)
 
       Await.ready(res, timeout)
       // check for md5
@@ -110,9 +100,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
       }
       val badUpload = new AWSWrapper(bucketName, new FakeS3())
 
-      val res = data
-        .via(badUpload.multipartUploadTransform(S3URL(bucketName, "random_data_3.txt")))
-        .runWith(Sink.ignore)
+      val res = data.via(badUpload.multipartUploadTransform(S3URL(bucketName, "random_data_3.txt"))).runWith(Sink.ignore)
 
       res.onComplete {
         case Success(x) => assert(false)

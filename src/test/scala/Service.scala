@@ -28,9 +28,7 @@ trait Service {
     post {
       extractRequest { request =>
         val resultFuture = request.entity.dataBytes
-          .via(aws.multipartUploadTransform(S3URL("com.3dr.publictest", "gimbaltest4k.mpeg")))
-          .map{part => println(s"completed part $part"); part}
-          .runWith(Sink.head)
+          .via(aws.multipartUploadTransform(S3URL("com.3dr.publictest", "gimbaltest4k.mpeg"))).runWith(Sink.ignore)
         onComplete(resultFuture) {
           case scala.util.Success(result) =>
             println(s"Got result: $result")
