@@ -1,6 +1,6 @@
 name := "stream-s3-wrapper"
 
-version := "2.0"
+version := "2.1-M2"
 
 scalaVersion := "2.11.7"
 
@@ -21,8 +21,8 @@ publishTo := {
 }
 
 libraryDependencies ++= {
-  val akkaV = "2.4.0"
-  val akkaStreamV = "2.0-M1"
+  val akkaV = "2.4.1"
+  val akkaStreamV = "2.0-M2"
   val scalaTestV = "2.2.4"
   Seq(
     "com.typesafe.akka" %% "akka-actor" % akkaV,

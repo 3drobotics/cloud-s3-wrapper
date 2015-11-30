@@ -4,7 +4,6 @@ import akka.actor.ActorSystem
 import akka.event.Logging
 import akka.http.scaladsl.model.{HttpEntity, ContentTypes}
 import akka.http.scaladsl.testkit.{RouteTestTimeout, ScalatestRouteTest}
-import akka.stream.io.SynchronousFileSource
 import akka.stream.scaladsl.{Source, Sink}
 import akka.testkit._
 import akka.util.{ByteString, Timeout}
@@ -51,7 +50,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
       val url = getClass.getResource("/smallfile.txt")
       val file = new File(url.getFile)
       println(s"Reading file of size: ${file.length()}")
-      val imageSource = SynchronousFileSource(file)
+      val imageSource = Source.file(file)
 
       val smallFile = S3URL(bucketName, "smallfile.txt")
       val res = imageSource.via(aws.multipartUploadTransform(smallFile)).runWith(Sink.ignore)

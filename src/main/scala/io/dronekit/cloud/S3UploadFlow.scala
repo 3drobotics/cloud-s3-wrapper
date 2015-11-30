@@ -153,7 +153,7 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
       private def setPartCompleted(partNumber: Long, etag: Option[PartETag]): Unit = {
         chunkMap(partNumber) = UploadChunk(partNumber, ByteString.empty, UploadCompleted, etag)
       }
-      
+
       private def outstandingChunks: Long = {
         chunkMap.filter { case (part, chunk) => chunk.state != UploadCompleted }.toList.length
       }
