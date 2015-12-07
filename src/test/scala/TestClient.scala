@@ -5,10 +5,11 @@ import akka.event.Logging
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.{ContentTypes, HttpEntity, HttpMethods, HttpRequest}
 import akka.stream.ActorMaterializer
-import akka.stream.io.SynchronousFileSource
+import akka.stream.scaladsl.Source
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import scala.io.StdIn
 
 /**
  * Created by Jason Martens <jason.martens@3drobotics.com> on 8/26/15.
@@ -21,13 +22,15 @@ object TestClient extends App {
   val logger = Logging(system, getClass)
 
 
-  val file = new File("/Users/jiahuang/3dr/stream-s3-uploader/src/test/resources/recap_res.obj.zip")
+  val file = new File("/Users/jasonmartens/Downloads/Star wars.mp4")
   logger.info(s"Reading file of size: ${file.length()}")
-  val imageSource = SynchronousFileSource(file).map {data => print("."); data}
+  val imageSource = Source.file(file)
   val entity = HttpEntity.Chunked.fromData(ContentTypes.`application/octet-stream`, imageSource)
   val request = HttpRequest(method = HttpMethods.POST, uri = "http://localhost:9090/upload", entity = entity)
   val responseFuture = Http().singleRequest(request)
-  // TODO: How to cleanly shutdown system after stream completes?
-  val result = Await.result(responseFuture, 1 hour)
+  val result = Await.result(responseFuture, 45 seconds)
   logger.info(s"Result: $result")
+
+  StdIn.readLine("done?")
+  system.terminate()
 }

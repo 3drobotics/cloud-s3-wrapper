@@ -5,7 +5,8 @@ import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Source, Sink}
 import com.amazonaws.services.s3.AmazonS3Client
-import io.dronekit.AWSWrapper
+import io.dronekit.cloud.{S3URL, AWSWrapper}
+import StatusCodes._
 
 import scala.concurrent.ExecutionContextExecutor
 import scala.language.postfixOps
@@ -16,21 +17,25 @@ import scala.language.postfixOps
  */
 trait Service {
   implicit val system: ActorSystem
-  implicit def executor: ExecutionContextExecutor
+  implicit val executor: ExecutionContextExecutor
   implicit val materializer: ActorMaterializer
-  val logger: LoggingAdapter
+  implicit val logger: LoggingAdapter
 
-  val s3Client = new AmazonS3Client()
+  lazy val aws = new AWSWrapper( "com.3dr.publictest")
 
-  val routes = pathPrefix("upload") {
+
+  lazy val routes = pathPrefix("upload") {
     post {
       extractRequest { request =>
-        complete {
-          println(s"Request is: ${request.entity.isChunked()}")
-            val aws = new AWSWrapper( "com.3dr.publictest", "")
-
-          request.entity.dataBytes.transform( () => aws.multipartUploadTransform("gimbaltest4k.mpeg")).runWith(Sink.ignore)
-          StatusCodes.OK
+        val resultFuture = request.entity.dataBytes
+          .via(aws.multipartUploadTransform(S3URL("com.3dr.publictest", "gimbaltest4k.mpeg"))).runWith(Sink.ignore)
+        onComplete(resultFuture) {
+          case scala.util.Success(result) =>
+            println(s"Got result: $result")
+            complete(OK)
+          case scala.util.Failure(ex) =>
+            logger.error(ex, "Failed to complete upload stream")
+            complete(ex)
         }
       }
     }
