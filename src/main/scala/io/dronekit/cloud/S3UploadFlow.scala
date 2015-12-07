@@ -3,17 +3,17 @@ package io.dronekit.cloud
 import java.io.ByteArrayInputStream
 import java.util
 
-import akka.event.LoggingAdapter
 import akka.stream._
 import akka.stream.stage._
 import akka.util.ByteString
 import com.amazonaws.services.s3.AmazonS3Client
 import com.amazonaws.services.s3.model._
+import com.typesafe.scalalogging.Logger
 
 import scala.collection.JavaConversions._
 import scala.collection._
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.util.{Try, Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 /**
   * Created by Jason Martens <jason.martens@3drobotics.com> on 8/18/15.
@@ -31,7 +31,7 @@ import scala.util.{Try, Failure, Success}
   *               Each uploaded chunk is kept track of in the chunkMap. When all the parts in the chunkMap are uploaded
   *               the stream finishes.
   */
-class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger: LoggingAdapter)
+class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger: Logger)
                   (implicit ec: ExecutionContext) extends GraphStageWithMaterializedValue[FlowShape[ByteString, UploadPartResult], Future[CompleteMultipartUploadResult]] {
   require(ec != null, "Execution context was null!")
 
@@ -121,7 +121,7 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
             completeStage()
           } catch {
             case ex: Throwable =>
-              logger.error(ex, s"Upload failed to s3://$bucket/$key while trying to complete")
+              logger.error(s"Upload failed to s3://$bucket/$key while trying to complete with $ex")
               abortUpload()
               failStage(ex)
           }
@@ -134,7 +134,7 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
         */
       private def onAsyncInput(input: Try[UploadPartResult]): Unit = input match {
         case Failure(ex) =>
-          logger.error(ex, s"Upload failed to s3://$bucket/$key")
+          logger.error(s"Upload failed to s3://$bucket/$key with $ex")
           abortUpload()
           failStage(ex)
         case Success(result) =>
@@ -212,7 +212,7 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
             }
             uploadFuture.recoverWith {
               case ex =>
-                logger.error(ex, s"Caught $ex, retry attempt $retryNumLocal")
+                logger.error(s"Caught $ex, retry attempt $retryNumLocal with $ex")
                 uploadHelper(retryNumLocal + 1)
             }
             uploadFuture

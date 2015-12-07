@@ -104,7 +104,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
       res.onComplete {
         case Success(x) => assert(false)
         case Failure(ex: AWSException) => assert(true)
-        case Failure(ex: Throwable) => assert(false)
+        case Failure(ex: Throwable) => fail(ex)
       }
 
       Await.ready(res, timeout)

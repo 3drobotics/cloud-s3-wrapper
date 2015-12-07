@@ -1,17 +1,18 @@
 package io.dronekit.cloud
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
+
 import akka.actor.ActorSystem
-import akka.event.{Logging, LoggingAdapter}
-import akka.stream.{SinkShape, FlowShape, ActorMaterializer}
+import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Flow, Sink, Source}
-import akka.stream.stage.{GraphStageWithMaterializedValue, GraphStage}
 import akka.util.ByteString
 import com.amazonaws.services.s3.AmazonS3Client
-import com.amazonaws.services.s3.model.{CompleteMultipartUploadResult, UploadPartResult, AmazonS3Exception, ObjectMetadata}
+import com.amazonaws.services.s3.model.{AmazonS3Exception, CompleteMultipartUploadResult, ObjectMetadata, UploadPartResult}
+import com.typesafe.scalalogging.Logger
 import org.joda.time.DateTime
+import org.slf4j.LoggerFactory
 
-import scala.concurrent.{Promise, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
 /**
@@ -41,12 +42,12 @@ object S3  {
  * Wrapper object around AWS client to allow mocking
  */
 class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
-                (implicit ec: ExecutionContext, logger: LoggingAdapter) {
+                (implicit ec: ExecutionContext, logger: Logger) {
   require(ec != null, "Execution context was null!")
 
   implicit val system = ActorSystem()
   implicit val materializer = ActorMaterializer()
-  implicit val adapter: LoggingAdapter = Logging(system, "AWSWrapper")
+  implicit val log: Logger = Logger(LoggerFactory.getLogger("AWSWrapper"))
 
   private def toByteArray(src: InputStream) = {
     val buffer = new ByteArrayOutputStream()
@@ -84,7 +85,7 @@ class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
         S3Client.getObject(s3url.bucket, s3url.key).getObjectContent
       catch {
         case ex: AmazonS3Exception =>
-          logger.error(ex, s"Failed to get $s3url")
+          logger.error(s"Failed to get $s3url: $ex")
           throw ex
       }
     }
@@ -137,7 +138,7 @@ class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
   }
 
   def multipartUploadTransform(s3url: S3URL): Flow[ByteString, UploadPartResult, Future[CompleteMultipartUploadResult]] = {
-    Flow.fromGraph(new S3UploadFlow(S3Client, s3url.bucket, s3url.key, adapter))
+    Flow.fromGraph(new S3UploadFlow(S3Client, s3url.bucket, s3url.key, log))
   }
 
 }

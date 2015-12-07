@@ -1,6 +1,6 @@
 name := "stream-s3-wrapper"
 
-version := "2.1-M2"
+version := "2.2-M2"
 
 scalaVersion := "2.11.7"
 
@@ -31,6 +31,8 @@ libraryDependencies ++= {
     "com.typesafe.akka" %% "akka-http-experimental" % akkaStreamV,
     "com.typesafe.akka" %% "akka-http-spray-json-experimental" % akkaStreamV,
     "com.typesafe.akka" %% "akka-http-testkit-experimental" % akkaStreamV,
+    "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0",
+    "ch.qos.logback" % "logback-classic" % "1.1.3",
     "com.amazonaws" % "aws-java-sdk-s3" % "1.10.32",
     "joda-time" % "joda-time" % "2.8.1",
     "org.scalatest" %% "scalatest" % scalaTestV % "test"
