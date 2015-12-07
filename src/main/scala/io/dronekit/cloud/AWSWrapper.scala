@@ -42,12 +42,11 @@ object S3  {
  * Wrapper object around AWS client to allow mocking
  */
 class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
-                (implicit ec: ExecutionContext, logger: Logger) {
+                (implicit ec: ExecutionContext) {
   require(ec != null, "Execution context was null!")
-
   implicit val system = ActorSystem()
   implicit val materializer = ActorMaterializer()
-  implicit val log: Logger = Logger(LoggerFactory.getLogger("AWSWrapper"))
+  val logger: Logger = Logger(LoggerFactory.getLogger(getClass))
 
   private def toByteArray(src: InputStream) = {
     val buffer = new ByteArrayOutputStream()
@@ -138,7 +137,7 @@ class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
   }
 
   def multipartUploadTransform(s3url: S3URL): Flow[ByteString, UploadPartResult, Future[CompleteMultipartUploadResult]] = {
-    Flow.fromGraph(new S3UploadFlow(S3Client, s3url.bucket, s3url.key, log))
+    Flow.fromGraph(new S3UploadFlow(S3Client, s3url.bucket, s3url.key, logger))
   }
 
 }
