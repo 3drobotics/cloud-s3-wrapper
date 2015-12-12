@@ -3,6 +3,8 @@ package io.dronekit.cloud
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
 
 import akka.actor.ActorSystem
+import akka.http.scaladsl.Http
+import akka.http.scaladsl.model.{HttpMethods, HttpRequest}
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.util.ByteString
@@ -86,6 +88,19 @@ class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
         case ex: AmazonS3Exception =>
           logger.error(s"Failed to get $s3url: $ex")
           throw ex
+      }
+    }
+  }
+
+  /**
+    * Get an object via HTTP directly, rather than through the Java API
+    * @param s3url The URL of the object to get
+    * @return A ByteString of the data
+    */
+  def getObjectAsByteString(s3url: S3URL): Future[ByteString] = {
+    getSignedUrl(s3url).flatMap { url =>
+      Http().singleRequest(HttpRequest(HttpMethods.GET, uri = url)).flatMap { resp =>
+        resp.entity.dataBytes.runFold[ByteString](ByteString())(_ ++ _)
       }
     }
   }
