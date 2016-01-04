@@ -5,7 +5,7 @@ import akka.event.Logging
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.{ContentTypes, HttpEntity, HttpMethods, HttpRequest}
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.Source
+import akka.stream.scaladsl.{FileIO, Source}
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -22,9 +22,9 @@ object TestClient extends App {
   val logger = Logging(system, getClass)
 
 
-  val file = new File("/Users/jasonmartens/Downloads/Star wars.mp4")
+  val file = new File("/Users/jasonmartens/Downloads/GOPR0651.m4v")
   logger.info(s"Reading file of size: ${file.length()}")
-  val imageSource = Source.file(file)
+  val imageSource = FileIO.fromFile(file)
   val entity = HttpEntity.Chunked.fromData(ContentTypes.`application/octet-stream`, imageSource)
   val request = HttpRequest(method = HttpMethods.POST, uri = "http://localhost:9090/upload", entity = entity)
   val responseFuture = Http().singleRequest(request)

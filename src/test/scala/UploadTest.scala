@@ -4,7 +4,7 @@ import akka.actor.ActorSystem
 import akka.event.Logging
 import akka.http.scaladsl.model.{HttpEntity, ContentTypes}
 import akka.http.scaladsl.testkit.{RouteTestTimeout, ScalatestRouteTest}
-import akka.stream.scaladsl.{Source, Sink}
+import akka.stream.scaladsl.{FileIO, Source, Sink}
 import akka.testkit._
 import akka.util.{ByteString, Timeout}
 import com.amazonaws.AmazonClientException
@@ -36,7 +36,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
   "io.dronekit.cloud.S3UploadSink" should {
     "handle all messages" in {
 
-      val res = Source(() => randomStringIterator).grouped(100).map(chunk => ByteString(chunk.mkString))
+      val res = Source.fromIterator(() => randomStringIterator).grouped(100).map(chunk => ByteString(chunk.mkString))
         .map{chunk => println(s"sending chunk of size ${chunk.length}"); chunk}
         .via(aws.multipartUploadTransform(s3url)).runWith(Sink.ignore)
       val result = Await.result(res, timeout)
@@ -50,7 +50,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
       val url = getClass.getResource("/smallfile.txt")
       val file = new File(url.getFile)
       println(s"Reading file of size: ${file.length()}")
-      val imageSource = Source.file(file)
+      val imageSource = FileIO.fromFile(file)
 
       val smallFile = S3URL(bucketName, "smallfile.txt")
       val res = imageSource.via(aws.multipartUploadTransform(smallFile)).runWith(Sink.ignore)
