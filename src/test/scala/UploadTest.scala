@@ -25,7 +25,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
   implicit def default(implicit system: ActorSystem) = RouteTestTimeout(5.seconds dilated)
   val bucketName = "com.3dr.publictest"
   implicit val logger = Logging.getLogger(system = system, logSource = getClass)
-  val aws = new AWSWrapper(bucketName)
+  val aws = new AWSWrapper()
   val s3url = S3URL(bucketName, "some_random_data.txt")
   implicit val timeout = 30 seconds
 
@@ -74,7 +74,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
           }
         }
       }
-      val finnikyUpload = new AWSWrapper(bucketName, new FakeS3())
+      val finnikyUpload = new AWSWrapper(new FakeS3())
 
       val randomDataUrl = S3URL(bucketName, "random_data_2.txt")
       val res = data.via(finnikyUpload.multipartUploadTransform(randomDataUrl)).runWith(Sink.ignore)
@@ -97,7 +97,7 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
 
         }
       }
-      val badUpload = new AWSWrapper(bucketName, new FakeS3())
+      val badUpload = new AWSWrapper(new FakeS3())
 
       val res = data.via(badUpload.multipartUploadTransform(S3URL(bucketName, "random_data_3.txt"))).runWith(Sink.ignore)
 
