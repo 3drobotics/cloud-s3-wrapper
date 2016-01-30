@@ -133,7 +133,7 @@ class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
    * @return A HTTP url for the object. Will time out!
    */
   def getSignedUrl(s3url: S3URL): Future[String] = {
-    val expiration: java.util.Date = new DateTime().plusHours(2).toDate
+    val expiration: java.util.Date = new DateTime().plusWeeks(1).toDate
     Future {
       val ret = S3Client.generatePresignedUrl(s3url.bucket, s3url.key, expiration)
       ret.toString
