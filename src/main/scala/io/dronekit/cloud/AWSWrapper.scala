@@ -43,7 +43,7 @@ object S3  {
 /**
  * Wrapper object around AWS client to allow mocking
  */
-class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
+class AWSWrapper(S3Client: AmazonS3Client = S3.client)
                 (implicit ec: ExecutionContext) {
   require(ec != null, "Execution context was null!")
   implicit val system = ActorSystem()
@@ -113,17 +113,17 @@ class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
 
   /**
    * Insert an object into the bucket
-   * @param key The location in the bucket to save the object
+   * @param s3url The location in the bucket to save the object
    * @param data The data to insert
    * @return The S3 URL (of the form s3://bucketname/key)
    */
-  def insertIntoBucket(key: String, data: ByteString): Future[S3URL] = {
+  def insertIntoBucket(s3url: S3URL, data: ByteString): Future[S3URL] = {
     val dataInputStream = new ByteArrayInputStream(data.toByteBuffer.array())
     Future {
       val metadata = new ObjectMetadata()
       metadata.setContentLength(data.length.toLong)
-      S3Client.putObject(awsBucket, key, dataInputStream, metadata)
-      S3URL(awsBucket, key)
+      S3Client.putObject(s3url.bucket, s3url.key, dataInputStream, metadata)
+      S3URL(s3url.bucket, s3url.key)
     }
   }
 
@@ -140,9 +140,8 @@ class AWSWrapper(val awsBucket: String, S3Client: AmazonS3Client = S3.client)
     }
   }
 
-  def streamInsertIntoBucket(dataSource: Source[ByteString, Any], key: String): Future[S3URL] = {
+  def streamInsertIntoBucket(dataSource: Source[ByteString, Any], s3url: S3URL): Future[S3URL] = {
     val p = Promise[S3URL]()
-    val s3url = S3URL(awsBucket, key)
     val streamRes = dataSource.via(multipartUploadTransform(s3url)).runWith(Sink.ignore)
     streamRes.onComplete{
       case Success(x) => p.success(s3url)
