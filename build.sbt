@@ -1,6 +1,6 @@
 name := "stream-s3-wrapper"
 
-version := "2.4"
+version := "2.4.1"
 
 scalaVersion := "2.11.7"
 
