@@ -1,3 +1,3 @@
-# stream-s3-uploader
+# cloud-s3-wrapper
 
-This is an Akka-Streams Sink which uploads ByteStrings to S3 using multipart upload. 
+An akka-streams wrapper to upload files to S3.
