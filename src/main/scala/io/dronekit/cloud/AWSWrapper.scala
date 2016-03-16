@@ -1,6 +1,7 @@
 package io.dronekit.cloud
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
+import java.util.Date
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
@@ -11,7 +12,7 @@ import akka.util.ByteString
 import com.amazonaws.services.s3.AmazonS3Client
 import com.amazonaws.services.s3.model.{AmazonS3Exception, CompleteMultipartUploadResult, ObjectMetadata, UploadPartResult}
 import com.typesafe.scalalogging.Logger
-import org.joda.time.DateTime
+import org.joda.time.{DateTimeZone, DateTime}
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -133,7 +134,7 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)
    * @param s3url The location in S3 of the object
    * @return A HTTP url for the object. Will time out!
    */
-  def getSignedUrl(s3url: S3URL, expiry: java.util.Date = new DateTime().plusDays(7).toDate): Future[String] = {
+  def getSignedUrl(s3url: S3URL, expiry: Date = new DateTime(DateTimeZone.UTC).plusDays(7).toDate): Future[String] = {
     Future {
       val ret = S3Client.generatePresignedUrl(s3url.bucket, s3url.key, expiry)
       ret.toString
