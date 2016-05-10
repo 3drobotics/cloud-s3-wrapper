@@ -23,7 +23,7 @@ import scala.util.{Failure, Success}
  *
  */
 
-class AWSException(msg: String) extends RuntimeException
+class AWSException(msg: String) extends RuntimeException(msg)
 
 /**
  * case class representing an internal S3 location
@@ -125,6 +125,12 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)
       metadata.setContentLength(data.length.toLong)
       S3Client.putObject(s3url.bucket, s3url.key, dataInputStream, metadata)
       S3URL(s3url.bucket, s3url.key)
+    }
+  }
+
+  def deleteObject(s3url: S3URL): Future[Unit] = {
+    Future {
+      S3Client.deleteObject(s3url.bucket, s3url.key)
     }
   }
 
