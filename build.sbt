@@ -2,7 +2,7 @@ name := "stream-s3-wrapper"
 
 version := "2.5.0"
 
-scalaVersion := "2.11.7"
+scalaVersion := "2.11.8"
 
 organization := "io.dronekit"
 
@@ -21,16 +21,15 @@ publishTo := {
 }
 
 libraryDependencies ++= {
-  val akkaV = "2.4.1"
-  val akkaStreamV = "2.0.1"
-  val scalaTestV = "2.2.4"
+  val akkaV = "2.4.4"
+  val scalaTestV = "2.2.6"
   Seq(
     "com.typesafe.akka" %% "akka-actor" % akkaV,
-    "com.typesafe.akka" %% "akka-stream-experimental" % akkaStreamV,
-    "com.typesafe.akka" %% "akka-http-core-experimental" % akkaStreamV,
-    "com.typesafe.akka" %% "akka-http-experimental" % akkaStreamV,
-    "com.typesafe.akka" %% "akka-http-spray-json-experimental" % akkaStreamV,
-    "com.typesafe.akka" %% "akka-http-testkit-experimental" % akkaStreamV,
+    "com.typesafe.akka" %% "akka-http-core" % akkaV,
+    "com.typesafe.akka" %% "akka-http-testkit" % akkaV,
+    "com.typesafe.akka" %% "akka-stream" % akkaV,
+    "com.typesafe.akka" %% "akka-http-experimental" % akkaV,
+    "com.typesafe.akka" %% "akka-http-spray-json-experimental" % akkaV,
     "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0",
     "ch.qos.logback" % "logback-classic" % "1.1.3",
     "com.amazonaws" % "aws-java-sdk-s3" % "1.10.32",
