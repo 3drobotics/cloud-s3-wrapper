@@ -135,16 +135,22 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)
   }
 
   /**
+  * Wrap sign url in a future for legacy composition
+  */
+  def getSignedUrl(s3url: S3URL, expiry: Date = new DateTime(DateTimeZone.UTC).plusDays(7).toDate): Future[String] = {
+    Future {
+      signUrl(s3url, expiry)
+    }
+  }
+
+  /**
    * Return a signed URL for the object in the configured bucket with key
    * max 7 day expiration date: http://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
    * @param s3url The location in S3 of the object
    * @return A HTTP url for the object. Will time out!
    */
-  def getSignedUrl(s3url: S3URL, expiry: Date = new DateTime(DateTimeZone.UTC).plusDays(7).toDate): Future[String] = {
-    Future {
-      val ret = S3Client.generatePresignedUrl(s3url.bucket, s3url.key, expiry)
-      ret.toString
-    }
+  def signUrl(s3url: S3URL, expiry: Date = new DateTime(DateTimeZone.UTC).plusDays(7).toDate): String = {
+    S3Client.generatePresignedUrl(s3url.bucket, s3url.key, expiry).toString
   }
 
   def streamInsertIntoBucket(dataSource: Source[ByteString, Any], s3url: S3URL): Future[S3URL] = {
