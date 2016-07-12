@@ -10,7 +10,8 @@ import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.util.ByteString
 import com.amazonaws.services.s3.AmazonS3Client
-import com.amazonaws.services.s3.model.{AmazonS3Exception, CompleteMultipartUploadResult, ObjectMetadata, UploadPartResult}
+import com.amazonaws.HttpMethod
+import com.amazonaws.services.s3.model.{AmazonS3Exception, CompleteMultipartUploadResult, ObjectMetadata, UploadPartResult, GeneratePresignedUrlRequest, ResponseHeaderOverrides}
 import com.typesafe.scalalogging.Logger
 import org.joda.time.{DateTimeZone, DateTime}
 import org.slf4j.LoggerFactory
@@ -19,31 +20,32 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
 /**
- * Created by Jason Martens <jason.martens@3drobotics.com> on 9/17/15.
- *
- */
+  * Created by Jason Martens <jason.martens@3drobotics.com> on 9/17/15.
+  *
+  */
 
 class AWSException(msg: String) extends RuntimeException(msg)
 
 /**
- * case class representing an internal S3 location
- * @param bucket The name of the bucket
- * @param key The name of the key
- */
+  * case class representing an internal S3 location
+  *
+  * @param bucket The name of the bucket
+  * @param key The name of the key
+  */
 case class S3URL(bucket: String, key: String) {
   override def toString = s"s3://$bucket/$key"
 }
 
 /**
- * Container for the actual AWS client (which can't be mocked easily)
- */
+  * Container for the actual AWS client (which can't be mocked easily)
+  */
 object S3  {
   val client = new AmazonS3Client()
 }
 
 /**
- * Wrapper object around AWS client to allow mocking
- */
+  * Wrapper object around AWS client to allow mocking
+  */
 class AWSWrapper(S3Client: AmazonS3Client = S3.client)
                 (implicit ec: ExecutionContext) {
   require(ec != null, "Execution context was null!")
@@ -65,10 +67,11 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)
   }
 
   /**
-   * Get an object from S3 as a byte array
-   * @param s3url The location of the object in S3
-   * @return A byte array
-   */
+    * Get an object from S3 as a byte array
+    *
+    * @param s3url The location of the object in S3
+    * @return A byte array
+    */
   def getObject(s3url: S3URL): Future[Array[Byte]] = {
     Future {
       val obj = S3Client.getObject(s3url.bucket, s3url.key)
@@ -77,10 +80,11 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)
   }
 
   /**
-   * Return an input stream to an object located in S3
-   * @param s3url The url of the form s3://bucketname/key
-   * @return an InputStream for the found object
-   */
+    * Return an input stream to an object located in S3
+    *
+    * @param s3url The url of the form s3://bucketname/key
+    * @return an InputStream for the found object
+    */
   def getObjectAsInputStream(s3url: S3URL): Future[InputStream] = {
     Future {
       try
@@ -95,6 +99,7 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)
 
   /**
     * Get an object via HTTP directly, rather than through the Java API
+    *
     * @param s3url The URL of the object to get
     * @return A ByteString of the data
     */
@@ -113,11 +118,12 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)
   }
 
   /**
-   * Insert an object into the bucket
-   * @param s3url The location in the bucket to save the object
-   * @param data The data to insert
-   * @return The S3 URL (of the form s3://bucketname/key)
-   */
+    * Insert an object into the bucket
+    *
+    * @param s3url The location in the bucket to save the object
+    * @param data The data to insert
+    * @return The S3 URL (of the form s3://bucketname/key)
+    */
   def insertIntoBucket(s3url: S3URL, data: ByteString): Future[S3URL] = {
     val dataInputStream = new ByteArrayInputStream(data.toByteBuffer.array())
     Future {
@@ -137,20 +143,30 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)
   /**
   * Wrap sign url in a future for legacy composition
   */
-  def getSignedUrl(s3url: S3URL, expiry: Date = new DateTime(DateTimeZone.UTC).plusDays(7).toDate): Future[String] = {
+  def getSignedUrl(s3url: S3URL, expiry: Date = new DateTime(DateTimeZone.UTC).plusDays(7).toDate, filename: Option[String] = None): Future[String] = {
     Future {
-      signUrl(s3url, expiry)
+      signUrl(s3url, expiry, filename)
     }
   }
 
   /**
-   * Return a signed URL for the object in the configured bucket with key
-   * max 7 day expiration date: http://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
-   * @param s3url The location in S3 of the object
-   * @return A HTTP url for the object. Will time out!
-   */
-  def signUrl(s3url: S3URL, expiry: Date = new DateTime(DateTimeZone.UTC).plusDays(7).toDate): String = {
-    S3Client.generatePresignedUrl(s3url.bucket, s3url.key, expiry).toString
+    * Return a signed URL for the object in the configured bucket with key
+    * max 7 day expiration date: http://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
+    *
+    * @param s3url The location in S3 of the object
+    * @return A HTTP url for the object. Will time out!
+    */
+  def signUrl(s3url: S3URL, expiry: Date = new DateTime(DateTimeZone.UTC).plusDays(7).toDate, filename: Option[String] = None): String = {
+    filename match {
+      case None => S3Client.generatePresignedUrl(s3url.bucket, s3url.key, expiry).toString
+      case Some(name) => {
+        val request: GeneratePresignedUrlRequest = new GeneratePresignedUrlRequest(s3url.bucket, s3url.key, HttpMethod.GET)
+        val headerOverrides: ResponseHeaderOverrides = new ResponseHeaderOverrides()
+        headerOverrides.setContentDisposition(s"attachment; filename=$name")
+        request.withResponseHeaders(headerOverrides).withExpiration(expiry)
+        S3Client.generatePresignedUrl(request).toString
+      }
+    }
   }
 
   def streamInsertIntoBucket(dataSource: Source[ByteString, Any], s3url: S3URL): Future[S3URL] = {
