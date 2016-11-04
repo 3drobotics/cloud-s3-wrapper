@@ -170,7 +170,7 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)
   }
 
   def streamUpload(s3url: S3URL): Sink[ByteString, Future[CompleteMultipartUploadResult]] = {
-    multipartUploadTransform(s3url).to(Sink.head)
+    multipartUploadTransform(s3url).fold(Seq.empty[UploadPartResult])(_ :+ _).to(Sink.head)
   }
 
   def streamInsertIntoBucket(dataSource: Source[ByteString, Any], s3url: S3URL): Future[S3URL] = {
