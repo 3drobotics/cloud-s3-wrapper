@@ -60,6 +60,20 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
       assert(metadataRes.getETag == "49ea9fa860f88a45545f5c59bc6dafbe-1")
     }
 
+    "Upload using the Sink" in {
+      val url = getClass.getResource("/wave_earth_mosaic_3.jpg")
+      val file = new File(url.getFile)
+      println(s"Reading file of size: ${file.length()}")
+      val imageSource = FileIO.fromPath(file.toPath)
+
+      val smallFile = S3URL(bucketName, "wave_earth_mosaic_3.jpg")
+      val res = imageSource.runWith(aws.streamUpload(smallFile))
+      Await.ready(res, 10 minutes)
+      // check for md5
+      val metadataRes = Await.result(aws.getObjectMetadata(smallFile), 60 seconds)
+      assert(metadataRes.getETag == "28b7d515a45e3566fe2b37a36964f5a0-3")
+    }
+
     "handle upload with retries" in {
       class FakeS3 extends AmazonS3Client {
         var partNum = 0
