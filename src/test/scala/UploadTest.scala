@@ -61,17 +61,16 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
     }
 
     "Upload using the Sink" in {
-      val url = getClass.getResource("/wave_earth_mosaic_3.jpg")
-      val file = new File(url.getFile)
-      println(s"Reading file of size: ${file.length()}")
-      val imageSource = FileIO.fromPath(file.toPath)
+      val source = Source.repeat(ByteString("S3 Upload Test String 12345"))
+        // Must be > 10 MB to test multiple parts
+        .take(1024*1024)
 
-      val smallFile = S3URL(bucketName, "wave_earth_mosaic_3.jpg")
-      val res = imageSource.runWith(aws.streamUpload(smallFile))
+      val fileName = S3URL(bucketName, "garbage_data.txt")
+      val res = source.runWith(aws.streamUpload(fileName))
       Await.ready(res, 10 minutes)
       // check for md5
-      val metadataRes = Await.result(aws.getObjectMetadata(smallFile), 60 seconds)
-      assert(metadataRes.getETag == "28b7d515a45e3566fe2b37a36964f5a0-3")
+      val metadataRes = Await.result(aws.getObjectMetadata(fileName), 60 seconds)
+      assert(metadataRes.getETag == "87ab7187c871e71a5ba430bf66523ff0-3")
     }
 
     "handle upload with retries" in {
