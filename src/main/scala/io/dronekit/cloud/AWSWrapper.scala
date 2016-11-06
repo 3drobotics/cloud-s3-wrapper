@@ -1,6 +1,7 @@
 package io.dronekit.cloud
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
+import java.time.{ZoneId, ZonedDateTime}
 import java.util.Date
 
 import akka.actor.ActorSystem
@@ -11,9 +12,8 @@ import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.util.ByteString
 import com.amazonaws.services.s3.AmazonS3Client
 import com.amazonaws.HttpMethod
-import com.amazonaws.services.s3.model.{AmazonS3Exception, CompleteMultipartUploadResult, ObjectMetadata, UploadPartResult, GeneratePresignedUrlRequest, ResponseHeaderOverrides}
+import com.amazonaws.services.s3.model.{AmazonS3Exception, CompleteMultipartUploadResult, GeneratePresignedUrlRequest, ObjectMetadata, ResponseHeaderOverrides, UploadPartResult}
 import com.typesafe.scalalogging.Logger
-import org.joda.time.{DateTimeZone, DateTime}
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -143,7 +143,7 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)
   /**
   * Wrap sign url in a future for legacy composition
   */
-  def getSignedUrl(s3url: S3URL, expiry: Date = new DateTime(DateTimeZone.UTC).plusDays(7).toDate, filename: Option[String] = None): Future[String] = {
+  def getSignedUrl(s3url: S3URL, expiry: ZonedDateTime = ZonedDateTime.now(ZoneId.of("UTC")).plusDays(7), filename: Option[String] = None): Future[String] = {
     Future {
       signUrl(s3url, expiry, filename)
     }
@@ -156,27 +156,28 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)
     * @param s3url The location in S3 of the object
     * @return A HTTP url for the object. Will time out!
     */
-  def signUrl(s3url: S3URL, expiry: Date = new DateTime(DateTimeZone.UTC).plusDays(7).toDate, filename: Option[String] = None): String = {
+  def signUrl(s3url: S3URL, expiry: ZonedDateTime = ZonedDateTime.now(ZoneId.of("UTC")).plusDays(7), filename: Option[String] = None): String = {
     filename match {
-      case None => S3Client.generatePresignedUrl(s3url.bucket, s3url.key, expiry).toString
+      case None => S3Client.generatePresignedUrl(s3url.bucket, s3url.key, Date.from(expiry.toInstant)).toString
       case Some(name) => {
         val request: GeneratePresignedUrlRequest = new GeneratePresignedUrlRequest(s3url.bucket, s3url.key, HttpMethod.GET)
         val headerOverrides: ResponseHeaderOverrides = new ResponseHeaderOverrides()
         headerOverrides.setContentDisposition(s"attachment; filename=$name")
-        request.withResponseHeaders(headerOverrides).withExpiration(expiry)
+        request.withResponseHeaders(headerOverrides).withExpiration(Date.from(expiry.toInstant))
         S3Client.generatePresignedUrl(request).toString
       }
     }
   }
 
+  def streamUpload(s3url: S3URL): Sink[ByteString, Future[CompleteMultipartUploadResult]] = {
+    multipartUploadTransform(s3url).to(Sink.ignore)
+  }
+
   def streamInsertIntoBucket(dataSource: Source[ByteString, Any], s3url: S3URL): Future[S3URL] = {
-    val p = Promise[S3URL]()
-    val streamRes = dataSource.via(multipartUploadTransform(s3url)).runWith(Sink.ignore)
-    streamRes.onComplete{
-      case Success(x) => p.success(s3url)
-      case Failure(ex) => p.failure(ex)
-    }
-    p.future
+    dataSource
+      .via(multipartUploadTransform(s3url))
+      .runWith(Sink.ignore)
+      .map( _ => s3url)
   }
 
   def multipartUploadTransform(s3url: S3URL): Flow[ByteString, UploadPartResult, Future[CompleteMultipartUploadResult]] = {

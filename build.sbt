@@ -1,6 +1,6 @@
 name := "stream-s3-wrapper"
 
-version := "2.6.2"
+version := "2.7.0"
 
 scalaVersion := "2.11.8"
 
@@ -21,7 +21,7 @@ publishTo := {
 }
 
 libraryDependencies ++= {
-  val akkaV = "2.4.4"
+  val akkaV = "2.4.11"
   val scalaTestV = "2.2.6"
   Seq(
     "com.typesafe.akka" %% "akka-actor" % akkaV,
@@ -33,7 +33,6 @@ libraryDependencies ++= {
     "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0",
     "ch.qos.logback" % "logback-classic" % "1.1.3",
     "com.amazonaws" % "aws-java-sdk-s3" % "1.10.32",
-    "joda-time" % "joda-time" % "2.8.1",
     "org.scalatest" %% "scalatest" % scalaTestV % "test"
   )
 }

@@ -60,6 +60,19 @@ class UploadTest extends WordSpec with Matchers with ScalatestRouteTest  {
       assert(metadataRes.getETag == "49ea9fa860f88a45545f5c59bc6dafbe-1")
     }
 
+    "Upload using the Sink" in {
+      val source = Source.repeat(ByteString("S3 Upload Test String 12345"))
+        // Must be > 10 MB to test multiple parts
+        .take(1024*1024)
+
+      val fileName = S3URL(bucketName, "garbage_data.txt")
+      val res = source.runWith(aws.streamUpload(fileName))
+      Await.ready(res, 10 minutes)
+      // check for md5
+      val metadataRes = Await.result(aws.getObjectMetadata(fileName), 60 seconds)
+      assert(metadataRes.getETag == "87ab7187c871e71a5ba430bf66523ff0-3")
+    }
+
     "handle upload with retries" in {
       class FakeS3 extends AmazonS3Client {
         var partNum = 0
