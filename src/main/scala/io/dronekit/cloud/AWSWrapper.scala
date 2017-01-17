@@ -46,11 +46,8 @@ object S3  {
 /**
   * Wrapper object around AWS client to allow mocking
   */
-class AWSWrapper(S3Client: AmazonS3Client = S3.client)
-                (implicit ec: ExecutionContext) {
+class AWSWrapper(S3Client: AmazonS3Client = S3.client)(implicit ec: ExecutionContext, materializer: ActorMaterializer, system: ActorSystem) {
   require(ec != null, "Execution context was null!")
-  implicit val system = ActorSystem()
-  implicit val materializer = ActorMaterializer()
   val logger: Logger = Logger(LoggerFactory.getLogger(getClass))
 
   private def toByteArray(src: InputStream) = {
