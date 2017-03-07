@@ -116,7 +116,6 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
 
         if (outstandingChunks == 0 && isClosed(in)) {
           try {
-            logger.debug("All chunks complete and in isClosed")
             completeUpload()
             completeStage()
           } catch {
@@ -138,10 +137,8 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
           abortUpload()
           failStage(ex)
         case Success(result) =>
-          logger.debug("onAsyncInput success")
           uploadResults = uploadResults :+ result
           setPartCompleted(result.getPartNumber, Some(result.getPartETag))
-          logger.debug(s"Completed part ${result.getPartNumber}")
           pushAndPull()
       }
 
@@ -159,7 +156,7 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
       }
 
       private def abortUpload() = {
-        logger.debug(s"Aborting upload to $bucket/$key with id ${multipartUpload.getUploadId}")
+        logger.debug(s"Aborting upload to s3://$bucket/$key with id ${multipartUpload.getUploadId}")
         s3Client.abortMultipartUpload(new AbortMultipartUploadRequest(bucket, key, multipartUpload.getUploadId))
       }
 
@@ -168,7 +165,7 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
         val etagArrayList: util.ArrayList[PartETag] = new util.ArrayList[PartETag](etagList.toIndexedSeq)
         val completeRequest = new CompleteMultipartUploadRequest(bucket, key, multipartUpload.getUploadId, etagArrayList)
         val result = s3Client.completeMultipartUpload(completeRequest)
-        logger.debug(s"Completed upload: $result")
+        logger.debug(s"Completed upload to s3://$bucket/$key (${etagArrayList.length} parts)")
         p.success(result)
       }
 
@@ -207,7 +204,6 @@ class S3UploadFlow(s3Client: AmazonS3Client, bucket: String, key: String, logger
                 .withPartNumber(partNumber)
                 .withPartSize(buffer.length)
                 .withInputStream(new ByteArrayInputStream(buffer.toArray[Byte]))
-              logger.debug(s"Uploading part $partNumber")
               s3Client.uploadPart(partUploadRequest)
             }
             uploadFuture.recoverWith {
