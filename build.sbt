@@ -1,8 +1,9 @@
 name := "stream-s3-wrapper"
 
-version := "2.7.2"
+version := "2.7.3"
 
-scalaVersion := "2.11.8"
+scalaVersion := "2.12.2"
+crossScalaVersions := Seq("2.11.8", "2.12.2")
 
 organization := "io.dronekit"
 
@@ -21,18 +22,21 @@ publishTo := {
 }
 
 libraryDependencies ++= {
-  val akkaV = "2.4.11"
-  val scalaTestV = "2.2.6"
+  val akkaV = "2.5.0"
+  val akkaHttpV = "10.0.5"
+  
   Seq(
     "com.typesafe.akka" %% "akka-actor" % akkaV,
-    "com.typesafe.akka" %% "akka-http-core" % akkaV,
-    "com.typesafe.akka" %% "akka-http-testkit" % akkaV,
     "com.typesafe.akka" %% "akka-stream" % akkaV,
-    "com.typesafe.akka" %% "akka-http-experimental" % akkaV,
-    "com.typesafe.akka" %% "akka-http-spray-json-experimental" % akkaV,
-    "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0",
+
+    "com.typesafe.akka" %% "akka-http-core" % akkaHttpV,
+    "com.typesafe.akka" %% "akka-http" % akkaHttpV,
+    "com.typesafe.akka" %% "akka-http-testkit" % akkaHttpV,
+
+    "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",
     "ch.qos.logback" % "logback-classic" % "1.1.3",
-    "com.amazonaws" % "aws-java-sdk-s3" % "1.10.32",
-    "org.scalatest" %% "scalatest" % scalaTestV % "test"
+    "com.amazonaws" % "aws-java-sdk-s3" % "1.11.122",
+    "com.amazonaws" % "aws-java-sdk-core" % "1.11.122",
+    "org.scalatest" %% "scalatest" % "3.0.1" % "test"
   )
 }
