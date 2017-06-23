@@ -153,16 +153,16 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)(implicit ec: ExecutionCon
     * @param s3url The location in S3 of the object
     * @return A HTTP url for the object. Will time out!
     */
-  def signUrl(s3url: S3URL, expiry: ZonedDateTime = ZonedDateTime.now(ZoneId.of("UTC")).plusDays(7), filename: Option[String] = None): String = {
-    filename match {
-      case None => S3Client.generatePresignedUrl(s3url.bucket, s3url.key, Date.from(expiry.toInstant)).toString
-      case Some(name) => {
-        val request: GeneratePresignedUrlRequest = new GeneratePresignedUrlRequest(s3url.bucket, s3url.key, HttpMethod.GET)
-        val headerOverrides: ResponseHeaderOverrides = new ResponseHeaderOverrides()
-        headerOverrides.setContentDisposition(s"attachment; filename=$name")
-        request.withResponseHeaders(headerOverrides).withExpiration(Date.from(expiry.toInstant))
-        S3Client.generatePresignedUrl(request).toString
-      }
+  def signUrl(s3url: S3URL, expiry: ZonedDateTime = ZonedDateTime.now(ZoneId.of("UTC")).plusDays(7), filename: Option[String] = None, contentType: Option[String] = None): String = {
+    if (filename.isDefined || contentType.isDefined) {
+      val request: GeneratePresignedUrlRequest = new GeneratePresignedUrlRequest(s3url.bucket, s3url.key, HttpMethod.GET)
+      val headerOverrides: ResponseHeaderOverrides = new ResponseHeaderOverrides()
+      filename.foreach { name => headerOverrides.setContentDisposition(s"attachment; filename=$name") }
+      contentType.foreach { ct => headerOverrides.setContentType(ct) }
+      request.withResponseHeaders(headerOverrides).withExpiration(Date.from(expiry.toInstant))
+      S3Client.generatePresignedUrl(request).toString
+    } else {
+      S3Client.generatePresignedUrl(s3url.bucket, s3url.key, Date.from(expiry.toInstant)).toString
     }
   }
 
