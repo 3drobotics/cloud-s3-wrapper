@@ -6,7 +6,7 @@ import java.util.Date
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{HttpMethods, HttpRequest}
+import akka.http.scaladsl.model.{HttpMethods, HttpRequest, StatusCodes}
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.util.ByteString
@@ -103,7 +103,10 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)(implicit ec: ExecutionCon
   def getObjectAsByteString(s3url: S3URL): Future[ByteString] = {
     getSignedUrl(s3url).flatMap { url =>
       Http().singleRequest(HttpRequest(HttpMethods.GET, uri = url)).flatMap { resp =>
-        resp.entity.dataBytes.runFold[ByteString](ByteString())(_ ++ _)
+        resp.status match {
+          case _: StatusCodes.Success => resp.entity.dataBytes.runFold[ByteString](ByteString())(_ ++ _)
+          case failedStatus => throw new RuntimeException(s"Failed to fetch ${url}, status ${failedStatus}: ${resp.entity}")
+        }
       }
     }
   }
