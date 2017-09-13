@@ -15,6 +15,7 @@ import com.amazonaws.HttpMethod
 import com.amazonaws.services.s3.model.{AmazonS3Exception, CompleteMultipartUploadResult, GeneratePresignedUrlRequest, ObjectMetadata, ResponseHeaderOverrides, UploadPartResult}
 import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
+import akka.http.scaladsl.model.headers.`Raw-Request-URI`
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
@@ -100,16 +101,24 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)(implicit ec: ExecutionCon
     * @param s3url The URL of the object to get
     * @return A ByteString of the data
     */
-  def getObjectAsByteString(s3url: S3URL): Future[ByteString] = {
-    getSignedUrl(s3url).flatMap { url =>
-      Http().singleRequest(HttpRequest(HttpMethods.GET, uri = url)).flatMap { resp =>
-        resp.status match {
-          case _: StatusCodes.Success => resp.entity.dataBytes.runFold[ByteString](ByteString())(_ ++ _)
-          case failedStatus => throw new RuntimeException(s"Failed to fetch ${url}, status ${failedStatus}: ${resp.entity}")
-        }
-      }
-    }
-  }
+   def getObjectAsByteString(s3url: S3URL): Future[ByteString] = {
+     getObjectSource(s3url).flatMap { dataBytes =>
+       dataBytes.runFold[ByteString](ByteString())(_ ++ _)
+     }
+   }
+
+   def getObjectSource(s3url: S3URL): Future[Source[ByteString, Any]] = {
+     for {
+       url <- getSignedUrl(s3url)
+       path = new java.net.URL(url).getFile
+       resp <- Http().singleRequest(HttpRequest(HttpMethods.GET, uri = url, headers=List(`Raw-Request-URI`(url))))
+     } yield {
+       resp.status match {
+         case _ : StatusCodes.Success => resp.entity.dataBytes
+         case failedStatus => throw new AWSException(s"Failed to fetch ${url}, status ${failedStatus}: ${resp.entity}")
+       }
+     }
+   }
 
   def getObjectMetadata(s3url: S3URL): Future[ObjectMetadata] = {
     Future {
