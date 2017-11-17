@@ -111,7 +111,7 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)(implicit ec: ExecutionCon
      for {
        url <- getSignedUrl(s3url)
        path = new java.net.URL(url).getFile
-       resp <- Http().singleRequest(HttpRequest(HttpMethods.GET, uri = url, headers=List(`Raw-Request-URI`(url))))
+       resp <- Http().singleRequest(HttpRequest(HttpMethods.GET, uri = url, headers=List(`Raw-Request-URI`(path))))
      } yield {
        resp.status match {
          case _ : StatusCodes.Success => resp.entity.dataBytes
