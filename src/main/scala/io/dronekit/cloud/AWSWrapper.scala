@@ -6,7 +6,7 @@ import java.util.Date
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{HttpMethods, HttpRequest, StatusCodes}
+import akka.http.scaladsl.model.{HttpMethods, HttpRequest, StatusCodes, ResponseEntity}
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.util.ByteString
@@ -107,17 +107,21 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)(implicit ec: ExecutionCon
      }
    }
 
-   def getObjectSource(s3url: S3URL): Future[Source[ByteString, Any]] = {
+   def getObjectAsEntity(s3url: S3URL): Future[ResponseEntity] = {
      for {
        url <- getSignedUrl(s3url)
        path = new java.net.URL(url).getFile
        resp <- Http().singleRequest(HttpRequest(HttpMethods.GET, uri = url, headers=List(`Raw-Request-URI`(path))))
      } yield {
        resp.status match {
-         case _ : StatusCodes.Success => resp.entity.dataBytes
+         case _ : StatusCodes.Success => resp.entity
          case failedStatus => throw new AWSException(s"Failed to fetch ${url}, status ${failedStatus}: ${resp.entity}")
        }
      }
+   }
+
+   def getObjectSource(s3url: S3URL): Future[Source[ByteString, Any]] = {
+     getObjectAsEntity(s3url).map { _.dataBytes }
    }
 
   def getObjectMetadata(s3url: S3URL): Future[ObjectMetadata] = {
