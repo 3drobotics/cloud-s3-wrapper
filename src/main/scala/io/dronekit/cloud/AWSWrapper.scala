@@ -173,7 +173,10 @@ class AWSWrapper(S3Client: AmazonS3Client = S3.client)(implicit ec: ExecutionCon
     if (filename.isDefined || contentType.isDefined) {
       val request: GeneratePresignedUrlRequest = new GeneratePresignedUrlRequest(s3url.bucket, s3url.key, HttpMethod.GET)
       val headerOverrides: ResponseHeaderOverrides = new ResponseHeaderOverrides()
-      filename.foreach { name => headerOverrides.setContentDisposition(s"attachment; filename=$name") }
+      filename.foreach { name =>
+        val safeName = java.net.URLEncoder.encode(name, "US-ASCII")
+        headerOverrides.setContentDisposition(s"attachment; filename=${safeName}")
+      }
       contentType.foreach { ct => headerOverrides.setContentType(ct) }
       request.withResponseHeaders(headerOverrides).withExpiration(Date.from(expiry.toInstant))
       S3Client.generatePresignedUrl(request).toString
