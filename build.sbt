@@ -1,6 +1,6 @@
 name := "stream-s3-wrapper"
 
-version := "2.8.3"
+version := "2.8.4"
 
 scalaVersion := "2.12.2"
 crossScalaVersions := Seq("2.11.8", "2.12.2")
